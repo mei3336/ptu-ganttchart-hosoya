@@ -66,12 +66,23 @@
     }
 
     /* ===== ヘッダー（基本設計書2.1節：2段構成） ===== */
+    /* 【設計判断：ヘッダーは折り返さず、あふれたら行全体を横スクロールする】
+       画面幅が狭くなるとボタンが個別に折り返されて2段ヘッダーが何段にも積み重なる不具合と、
+       あふれたボタンが右端で見えなくなる不具合の両方を、同じ仕組みで解消する。
+       flex-wrap:nowrapで折り返しを禁止した上でoverflow-x:autoにすると、あふれた分は
+       消えも折り返しもせず、ヘッダー行だけが横スクロール可能になる（ページ全体は
+       スクロールしない。UIデザイン仕様書のレイアウトを保つため）。
+       子要素側にflex-shrink:0を持たせないと、スクロールの前にボタンが押し潰されて
+       文字が読めなくなる（flexboxの既定挙動＝縮小優先）ため、併せて指定する。 */
     .app-header-primary,
     .app-header-secondary {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 0 16px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex-wrap: nowrap;
     }
 
     .app-header-primary {
@@ -91,7 +102,18 @@
     .header-group {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+    }
+
+    /* 「表示粒度（日/週/1ヶ月/3ヶ月）」「列トグル（開始/終了/状態）」のように、
+       意味のあるまとまりを1つの塊としてスクロール・折り返しさせるための入れ物。
+       塊の中はgapを詰め、塊同士の間はheader-groupのgap(10px)で少し広めに取る。 */
+    .button-group {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
     }
 
     .app-logo {
@@ -116,13 +138,18 @@
     }
 
     button.toolbar-button {
-      padding: 4px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 12px;
       border: 1px solid var(--color-border-dark);
       border-radius: var(--radius-standard);
       background: var(--color-white);
       color: var(--color-text-mid);
       cursor: pointer;
       font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     button.toolbar-button:hover:not(:disabled) {
@@ -148,6 +175,8 @@
       background: var(--color-white);
       color: var(--color-accent);
       cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     #createProjectButton:hover {
@@ -849,6 +878,7 @@
       <label for="projectSelectDropdown">プロジェクト：</label>
       <select id="projectSelectDropdown"></select>
       <button id="createProjectButton" type="button">＋ 新規プロジェクト</button>
+      <button id="deleteProjectButton" class="toolbar-button" type="button">🗑 プロジェクト削除</button>
     </div>
     <div class="header-group">
       <!-- データ取込／データ出力／PDF出力／Excel出力は今回のスコープ外（別工程）。
@@ -864,15 +894,21 @@
     <div class="header-group">
       <button id="lockToggleButton" class="toolbar-button" type="button">🔒 ロック</button>
       <button id="addScheduleButton" class="toolbar-button" type="button">＋ スケジュール追加</button>
-      <button class="toolbar-button is-active" type="button" data-granularity="day">日</button>
-      <button class="toolbar-button" type="button" data-granularity="week">週</button>
-      <button class="toolbar-button" type="button" data-granularity="month">1ヶ月</button>
-      <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
+      <!-- 表示粒度（日/週/1ヶ月/3ヶ月）は1つの塊として、折り返さずセットのままスクロールさせる。 -->
+      <div class="button-group">
+        <button class="toolbar-button is-active" type="button" data-granularity="day">日</button>
+        <button class="toolbar-button" type="button" data-granularity="week">週</button>
+        <button class="toolbar-button" type="button" data-granularity="month">1ヶ月</button>
+        <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
+      </div>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
       <button class="toolbar-button" type="button" data-out-of-scope-label="全て開く・全て閉じる">全て開く／閉じる</button>
-      <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
-      <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
-      <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
+      <!-- 列トグル（開始/終了/状態）も同様に1つの塊としてまとめる。 -->
+      <div class="button-group">
+        <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
+        <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
+        <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
+      </div>
       <button class="toolbar-button" type="button" data-out-of-scope-label="マイルストーン管理">マイルストーン</button>
       <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
@@ -2515,13 +2551,15 @@
     }
 
     // 【前提】isLocked は現在のプロジェクトのロック状態。
-    // 【処理】ロック帯の表示・スケジュール追加ボタンの活性状態・ロックボタンの選択状態を
-    //   まとめて切り替える（基本設計書3.3節）。
+    // 【処理】ロック帯の表示・スケジュール追加ボタンの活性状態・ロックボタンの選択状態・
+    //   プロジェクト削除ボタンの表示有無をまとめて切り替える（基本設計書3.3節：
+    //   ロック中はスケジュール追加ボタンを無効化し、プロジェクト削除ボタンは非表示にする）。
     // 【結果】画面上のロック関連の見た目が状態に一致する。
     function applyLockState(isLocked) {
       document.getElementById("lockBand").hidden = !isLocked;
       document.getElementById("addScheduleButton").disabled = isLocked;
       document.getElementById("lockToggleButton").classList.toggle("is-active", isLocked);
+      document.getElementById("deleteProjectButton").hidden = isLocked;
     }
 
     // ===== UI：統括（データ取得→純粋関数→DOM反映のつなぎ） =====
@@ -3206,6 +3244,122 @@
       await switchToProject(projectToSave.id);
     }
 
+    // 【前提】projectId は削除したいプロジェクトのid。project は削除前に取得済みの
+    //   プロジェクトオブジェクト（変更履歴のsnapshot・itemNameに使う）。
+    // 【処理】配下データ（スケジュール・タスク・issue・コメント・メモ・即時メモ・
+    //   スナップショット）を先にすべて読み切ってから削除する（データモデル設計6章：
+    //   複数ストアにまたがる書き込みは読み切ってから行う方針）。
+    //   LOGGED_STORES対象（schedules/tasks/issues）は削除のたびに個別の変更履歴を記録し、
+    //   最後にプロジェクト自体の削除ログも記録してからprojectsストアの当該行を削除する。
+    //   既存の変更履歴（このプロジェクトのchangelogエントリ）は監査ログとして削除せず残す
+    //   （スナップショット・変更履歴自体の削除UIは今回のスコープ外のため、消す手段が無いことと
+    //   整合させる）。
+    // 【結果】プロジェクトと配下データがすべて削除される。
+    async function deleteProjectCascade(projectId, project) {
+      const scheduleList = await getSchedulesByProject(projectId);
+      const taskList = await getTasksByProject(projectId);
+      const issueList = await getIssuesByProject(projectId);
+      const memoList = await getMemosByProject(projectId);
+      const quickMemoList = await getQuickMemosByProject(projectId);
+      const snapshotList = await getSnapshotsByProject(projectId);
+
+      for (const schedule of scheduleList) {
+        const comments = await getCommentsByTask(schedule.id);
+        for (const comment of comments) {
+          await deleteComment(comment.id);
+        }
+      }
+      for (const schedule of scheduleList) {
+        await deleteSchedule(schedule.id);
+        await addChangelogEntry({
+          id: generateId(),
+          projectId,
+          action: "delete",
+          store: "schedules",
+          storeLabel: "スケジュール",
+          itemId: schedule.id,
+          itemName: schedule.name,
+          changes: [],
+          snapshot: schedule,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      for (const task of taskList) {
+        await deleteTask(task.id);
+        await addChangelogEntry({
+          id: generateId(),
+          projectId,
+          action: "delete",
+          store: "tasks",
+          storeLabel: "タスク",
+          itemId: task.id,
+          itemName: task.title,
+          changes: [],
+          snapshot: task,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      for (const issue of issueList) {
+        await deleteIssue(issue.id);
+        await addChangelogEntry({
+          id: generateId(),
+          projectId,
+          action: "delete",
+          store: "issues",
+          storeLabel: "マインドマップノード",
+          itemId: issue.id,
+          itemName: issue.title,
+          changes: [],
+          snapshot: issue,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      for (const memo of memoList) {
+        await deleteMemo(memo.id);
+      }
+      for (const quickMemo of quickMemoList) {
+        await deleteQuickMemo(quickMemo.id);
+      }
+      for (const snapshot of snapshotList) {
+        await deleteSnapshot(snapshot.id);
+      }
+
+      await addChangelogEntry({
+        id: generateId(),
+        projectId,
+        action: "delete",
+        store: "projects",
+        storeLabel: "プロジェクト",
+        itemId: project.id,
+        itemName: project.name,
+        changes: [],
+        snapshot: project,
+        createdAt: new Date().toISOString(),
+      });
+      await deleteProject(projectId);
+    }
+
+    // 【前提】currentSelectedProjectId・currentProjectObjectが設定済みであること。
+    // 【処理】確認ダイアログ（モーダル・ダイアログ一覧C1：「『{プロジェクト名}』を削除しますか？
+    //   （すべてのスケジュールも削除されます）」）の上でdeleteProjectCascadeする。
+    //   削除後は、残っている先頭のプロジェクトを選択し直す（無ければ未選択状態にする）。
+    // 【結果】確認OK時、プロジェクトと配下データが削除され、画面が更新される。
+    async function handleDeleteProjectButtonClick() {
+      if (!currentSelectedProjectId || !currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const confirmMessage = `「${currentProjectObject.name}」を削除しますか？（すべてのスケジュールも削除されます）`;
+      if (!window.confirm(confirmMessage)) return;
+
+      await deleteProjectCascade(currentSelectedProjectId, currentProjectObject);
+      await refreshProjectSelectDropdown();
+      const remainingProjectList = await getAllProjects();
+      const nextProjectId = remainingProjectList.length > 0 ? remainingProjectList[0].id : null;
+      document.getElementById("projectSelectDropdown").value = nextProjectId || "";
+      await switchToProject(nextProjectId);
+    }
+
     // 【前提】schedule はnull（新規作成モード）、または既存スケジュールオブジェクト（編集モード）。
     //   hasChildren は編集対象が子を持つか（子を持つ場合、開始日・終了日は自動計算のため
     //   読み取り専用にする。基本設計書4.2節）。
@@ -3650,6 +3804,7 @@
         switchToProject(event.target.value || null);
       });
       document.getElementById("createProjectButton").addEventListener("click", handleCreateProjectButtonClick);
+      document.getElementById("deleteProjectButton").addEventListener("click", handleDeleteProjectButtonClick);
       document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
       document.getElementById("closeKanbanPanelButton").addEventListener("click", () => {
