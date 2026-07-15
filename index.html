@@ -921,6 +921,13 @@
       border-bottom: 1px solid var(--color-border);
     }
 
+    .changelog-summary {
+      padding: 6px 16px;
+      font-size: 12px;
+      color: var(--color-text-light);
+      border-bottom: 1px solid var(--color-border);
+    }
+
     .changelog-action-badge {
       display: inline-block;
       padding: 1px 6px;
@@ -1084,7 +1091,9 @@
         <button type="button" class="toolbar-button" data-changelog-filter="add">追加</button>
         <button type="button" class="toolbar-button" data-changelog-filter="edit">変更</button>
         <button type="button" class="toolbar-button" data-changelog-filter="delete">削除</button>
+        <button type="button" class="toolbar-button" id="clearChangelogButton">全削除</button>
       </div>
+      <div id="changelogSummary" class="changelog-summary"></div>
       <div id="changelogPanelBody"></div>
     </div>
   </aside>
@@ -1754,10 +1763,56 @@
     }
 
     // 変更履歴（changelog）に記録する対象ストア（データモデル設計6章・基本設計書8.1節）。
-    // 「保存/削除のたびに自動でログを記録する仕組み（writeLog相当）」自体はまだ実装しておらず
-    // 別工程とするが、この定数は「連鎖削除がどのストアの操作をログに残すべきか」を
-    // deleteScheduleCascade/deleteIssueCascade が判断する根拠として、ここでは参照用に置く。
+    // 連鎖削除（deleteScheduleCascade/deleteIssueCascade/deleteProjectCascade）・
+    // 追加/変更の自動記録（recordChangelogEntry）の両方が、この定数を根拠に
+    // 「このストアの操作はログに残すべきか」を判断する。
     const LOGGED_STORES = ["projects", "schedules", "tasks", "issues"];
+
+    // 【前提】beforeObject は変更前のオブジェクト（新規作成時はnull）。afterObjectは保存後の
+    //   オブジェクト。fieldLabelsByKeyは{フィールド名: 表示ラベル}のマップで、比較対象を
+    //   明示的に絞り込む（idや並び順など、値が変わっても「ユーザーへの変更履歴」としては
+    //   意味を持たないフィールドを比較対象に含めないため）。
+    // 【処理】fieldLabelsByKeyに列挙された各フィールドについて、beforeとafterの値を比較し、
+    //   異なるものだけを集める。
+    // 【結果】[{field, label, before, after}] の配列を返す（1件も変わっていなければ空配列）。
+    function diffFields(beforeObject, afterObject, fieldLabelsByKey) {
+      const changes = [];
+      for (const [field, label] of Object.entries(fieldLabelsByKey)) {
+        const beforeValue = beforeObject ? beforeObject[field] : undefined;
+        const afterValue = afterObject[field];
+        if (beforeValue !== afterValue) {
+          changes.push({ field, label, before: beforeValue ?? null, after: afterValue ?? null });
+        }
+      }
+      return changes;
+    }
+
+    // 【前提】action は "add" | "edit"。projectIdは対象が属するプロジェクトのid
+    //   （store="projects"の場合はプロジェクト自身のid）。beforeItemは"edit"時のみ変更前の
+    //   オブジェクト（"add"時はnull）。afterItemは保存後のオブジェクト。fieldLabelsByKeyは
+    //   diffFieldsに渡す比較対象フィールドの一覧。
+    // 【処理】"add"はchanges:[]で無条件に1件記録する（基本設計書8.1節：追加ログに戻すボタンは
+    //   無いため差分は不要）。"edit"はdiffFieldsで実際に変わったフィールドを集め、1件も
+    //   変わっていなければ記録しない（保存ボタンを押しただけで内容が同じ場合に、意味のない
+    //   変更履歴が積み上がるのを防ぐ）。
+    // 【結果】記録した場合はtrueを、"edit"で変更が無く記録しなかった場合はfalseを返す。
+    async function recordChangelogEntry(action, projectId, store, storeLabel, itemId, itemName, beforeItem, afterItem, fieldLabelsByKey) {
+      const changes = action === "edit" ? diffFields(beforeItem, afterItem, fieldLabelsByKey) : [];
+      if (action === "edit" && changes.length === 0) return false;
+      await addChangelogEntry({
+        id: generateId(),
+        projectId,
+        action,
+        store,
+        storeLabel,
+        itemId,
+        itemName,
+        changes,
+        snapshot: afterItem,
+        createdAt: new Date().toISOString(),
+      });
+      return true;
+    }
 
     // 【前提】scheduleId は取得したいスケジュールの id。
     // 【処理】主キー(id)で1件を直接取得する（絞り込みではなく1件特定のため、インデックス不要）。
@@ -3206,8 +3261,6 @@
     }
 
     // ===== P6：変更履歴パネル =====
-    // 【設計判断】「戻す」機能（snapshotフィールドを1件書き戻す）は複合操作のため別工程とし、
-    //   今回は一覧表示とフィルタタブのみを実装する。
 
     // 現在のフィルタ（"all" | "add" | "edit" | "delete"）。
     let currentChangelogFilter = "all";
@@ -3217,7 +3270,8 @@
     // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件。filter は
     //   "all" | "add" | "edit" | "delete"。
     // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
-    //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。
+    //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。削除ログのみ「戻す」
+    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。
     // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderChangelogEntriesToHtml(changelogEntries, filter) {
       const filteredEntries = changelogEntries
@@ -3231,12 +3285,16 @@
       return filteredEntries
         .map((entry) => {
           const actionLabel = actionLabels[entry.action] || entry.action;
-          return `<div class="panel-list-item">
+          const restoreButtonHtml = entry.action === "delete"
+            ? `<button type="button" class="panel-add-button" data-action="restore-log">戻す</button>`
+            : "";
+          return `<div class="panel-list-item" data-entry-id="${escapeHtmlText(entry.id)}">
             <div class="panel-list-item-main">
               <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
               ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
               <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
             </div>
+            <div class="panel-list-item-actions">${restoreButtonHtml}</div>
           </div>`;
         })
         .join("");
@@ -3246,17 +3304,49 @@
       document.getElementById("changelogPanelBody").innerHTML = bodyHtml;
     }
 
+    // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件（フィルタで絞り込む前）。
+    // 【処理】action別の件数を数える（基本設計書8.1節：フィルタ下に全件数の内訳を表示する）。
+    //   フィルタタブの選択状態に関わらず、常に全件での内訳を示す。
+    // 【結果】「全{n}件（追加{n}・変更{n}・削除{n}）」の文字列を返す。
+    function renderChangelogSummaryToHtml(changelogEntries) {
+      const addCount = changelogEntries.filter((entry) => entry.action === "add").length;
+      const editCount = changelogEntries.filter((entry) => entry.action === "edit").length;
+      const deleteCount = changelogEntries.filter((entry) => entry.action === "delete").length;
+      return `全${changelogEntries.length}件（追加${addCount}・変更${editCount}・削除${deleteCount}）`;
+    }
+
+    function applyChangelogSummary(summaryText) {
+      document.getElementById("changelogSummary").textContent = summaryText;
+    }
+
     // 【前提】projectId はnull、または実在するプロジェクトのid。
     // 【処理】getChangelogByProjectで取得してcurrentChangelogEntriesにキャッシュし、
-    //   現在のフィルタで描画する。
+    //   現在のフィルタで一覧を、フィルタに関わらず全件の内訳をサマリーとして描画する。
     // 【結果】変更履歴パネルの表示が最新の状態に更新される。
     async function refreshChangelogPanel(projectId) {
       if (!projectId) {
+        applyChangelogSummary("");
         applyChangelogPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
         return;
       }
       currentChangelogEntries = await getChangelogByProject(projectId);
+      applyChangelogSummary(renderChangelogSummaryToHtml(currentChangelogEntries));
       applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
+    }
+
+    // 【前提】currentSelectedProjectId・currentChangelogEntriesが設定済みであること。
+    // 【処理】0件なら案内のみ表示して終了する。1件以上あれば件数を明示した確認ダイアログの上で
+    //   clearChangelogByProjectする（詳細設計書3.6.3）。
+    // 【結果】確認OK時、このプロジェクトの変更履歴がすべて削除され、パネルが再描画される。
+    async function handleClearChangelogButtonClick() {
+      if (currentChangelogEntries.length === 0) {
+        window.alert("履歴がありません");
+        return;
+      }
+      if (!window.confirm(`${currentChangelogEntries.length}件の変更履歴を削除しますか？`)) return;
+      await clearChangelogByProject(currentSelectedProjectId);
+      window.alert("変更履歴を削除しました");
+      await refreshChangelogPanel(currentSelectedProjectId);
     }
 
     // 【前提】filter は "all" | "add" | "edit" | "delete"。buttonElement はクリックされたボタン。
@@ -3265,10 +3355,46 @@
     // 【結果】変更履歴パネルの表示が新しいフィルタの内容になる。
     function handleChangelogFilterClick(filter, buttonElement) {
       currentChangelogFilter = filter;
-      for (const tabButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
+      for (const tabButton of document.querySelectorAll("#changelogFilterTabs [data-changelog-filter]")) {
         tabButton.classList.toggle("is-active", tabButton === buttonElement);
       }
       applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
+    }
+
+    // 【前提】entryId は「戻す」を押された変更履歴エントリのid（currentChangelogEntriesに
+    //   含まれること。削除ログのみボタンが表示されるため、通常はaction==="delete"）。
+    // 【処理】確認の上、entry.snapshot（削除直前の全フィールドのコピー）をentry.storeに
+    //   応じたadd*関数でそのまま書き戻す（データモデル設計6章：snapshotは削除時点の
+    //   完全なコピーのため、putし直せば元の状態に戻る）。復元操作自体は新たな変更履歴として
+    //   記録しない（「戻す」を繰り返すたびにログが増え続けるのを防ぐため）。この単純な
+    //   書き戻しには限界があり、連鎖削除で一緒に消えた子スケジュール・コメント等の
+    //   関連データまでは復元しない（単一レコードの復元に留まる、既知の非整合）。
+    // 【結果】snapshotが無ければ案内のみ表示し何もしない。復元後は対象パネルと
+    //   変更履歴パネルを再描画する。
+    async function handleRestoreFromLogButtonClick(entryId) {
+      const entry = currentChangelogEntries.find((changelogEntry) => changelogEntry.id === entryId);
+      if (!entry) return;
+      if (!entry.snapshot) {
+        window.alert("復元データがありません");
+        return;
+      }
+      if (!window.confirm(`「${entry.itemName}」（${entry.storeLabel}）をこの時点の状態に戻しますか？`)) return;
+
+      if (entry.store === "projects") {
+        await addProject(entry.snapshot);
+        await refreshProjectSelectDropdown();
+      } else if (entry.store === "schedules") {
+        await addSchedule(entry.snapshot);
+        await refreshGanttPanel(currentSelectedProjectId);
+      } else if (entry.store === "tasks") {
+        await addTask(entry.snapshot);
+        await refreshKanbanPanel(currentSelectedProjectId);
+      } else if (entry.store === "issues") {
+        await addIssue(entry.snapshot);
+        await refreshMindmapPanel(currentSelectedProjectId);
+      }
+      window.alert(`「${entry.itemName}」を復元しました`);
+      await refreshChangelogPanel(currentSelectedProjectId);
     }
 
     // refreshGanttPanelと同じ考え方。対象はissues・マインドマップキャンバス。
@@ -3410,9 +3536,15 @@
       return null;
     }
 
+    // 変更履歴（changelog）に記録するプロジェクトの対象フィールド（データモデル設計6章）。
+    // milestones/locked/createdAtはこのモーダルから編集できないため対象外。
+    const PROJECT_LOGGED_FIELD_LABELS = { name: "名前", startDate: "開始日", endDate: "終了日" };
+
     // 【前提】existingProject はnull（新規作成）または既存プロジェクトオブジェクト（編集）。
     // 【処理】モーダル内の入力値を読み取り、validateProjectModalInputでバリデーションし、
-    //   OKならaddProjectで保存してモーダルを閉じ、画面を更新する。
+    //   OKならaddProjectで保存してモーダルを閉じ、画面を更新する。保存後、追加/変更の
+    //   変更履歴をrecordChangelogEntryで記録する（詳細設計書3.6.1：LOGGED_STORES対象は
+    //   保存のたびに自動記録）。
     // 【結果】保存成功時はモーダルを閉じ、プロジェクト一覧・選択状態を更新する。
     async function handleProjectModalSaveButtonClick(existingProject) {
       const name = document.getElementById("projectModalNameInput").value.trim();
@@ -3429,6 +3561,17 @@
         ? { ...existingProject, name, startDate, endDate }
         : { id: generateId(), name, startDate, endDate, milestones: [], locked: false, createdAt: new Date().toISOString() };
       await addProject(projectToSave);
+      await recordChangelogEntry(
+        existingProject ? "edit" : "add",
+        projectToSave.id,
+        "projects",
+        "プロジェクト",
+        projectToSave.id,
+        projectToSave.name,
+        existingProject,
+        projectToSave,
+        PROJECT_LOGGED_FIELD_LABELS
+      );
       closeModal();
       await refreshProjectSelectDropdown();
       document.getElementById("projectSelectDropdown").value = projectToSave.id;
@@ -3683,6 +3826,18 @@
       return null;
     }
 
+    // 変更履歴（changelog）に記録するスケジュールの対象フィールド（データモデル設計6章）。
+    // projectId/parentId/orderはユーザーが直接編集する値ではないため対象外。
+    const SCHEDULE_LOGGED_FIELD_LABELS = {
+      name: "名前",
+      startDate: "開始日",
+      endDate: "終了日",
+      assignee: "担当者",
+      taskStatus: "ステータス",
+      notes: "メモ",
+      color: "カラー",
+    };
+
     // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
     //   presetParentId は新規作成時の親id（ルート作成ならnull、子スケジュール追加なら
     //   そのスケジュールのid）。existingSchedule有り（編集）の場合は無視する
@@ -3691,7 +3846,10 @@
     //   OKならaddScheduleで保存する。子を持つ行は開始日・終了日を既存値のまま維持する
     //   （手入力欄は読み取り専用にしているため）。
     //   新規作成後、親を持つ場合はsyncAncestorDatesで祖先の日付を再計算する
-    //   （子を追加すると親の期間が変わりうるため。基本設計書4.3節）。
+    //   （子を追加すると親の期間が変わりうるため。基本設計書4.3節）。保存後、追加/変更の
+    //   変更履歴をrecordChangelogEntryで記録する（詳細設計書3.6.1）。なおsyncAncestorDates
+    //   による祖先スケジュールの日付再計算自体は、子の追加/編集操作の副作用であり独立した
+    //   ユーザー操作ではないため、別途ログは残さない（記録するとノイズになるため）。
     // 【結果】保存成功時はモーダルを閉じ、ガントパネルを更新する。
     async function handleScheduleModalSaveButtonClick(existingSchedule, presetParentId) {
       const name = document.getElementById("scheduleModalNameInput").value.trim();
@@ -3733,6 +3891,17 @@
             order: currentScheduleTreeRows.length,
           };
       await addSchedule(scheduleToSave);
+      await recordChangelogEntry(
+        existingSchedule ? "edit" : "add",
+        scheduleToSave.projectId,
+        "schedules",
+        "スケジュール",
+        scheduleToSave.id,
+        scheduleToSave.name,
+        existingSchedule,
+        scheduleToSave,
+        SCHEDULE_LOGGED_FIELD_LABELS
+      );
       if (scheduleToSave.parentId !== null && scheduleToSave.parentId !== undefined) {
         await syncAncestorDates(scheduleToSave.parentId);
       }
@@ -3870,7 +4039,7 @@
       const priority = Number(formElement.querySelector(".kanban-add-priority-select").value);
       const dueDate = formElement.querySelector(".kanban-add-duedate-input").value;
       const columnStatus = formElement.dataset.columnStatus;
-      await addTask({
+      const taskToSave = {
         id: generateId(),
         projectId: currentSelectedProjectId,
         title,
@@ -3881,7 +4050,9 @@
         dueDate,
         description: "",
         order: 0,
-      });
+      };
+      await addTask(taskToSave);
+      await recordChangelogEntry("add", currentSelectedProjectId, "tasks", "タスク", taskToSave.id, taskToSave.title, null, taskToSave, {});
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
@@ -4124,24 +4295,31 @@
       document.getElementById("mindmapContextMenu").hidden = true;
     }
 
+    // 変更履歴（changelog）に記録するissue(マインドマップノード)の対象フィールド。
+    // 現状ユーザーが直接編集できる値はtitle（名前変更）のみのため、これだけを対象にする
+    // （x/y座標はドラッグのたびに変わるため対象に含めない＝下記の判断ポイント参照）。
+    const ISSUE_LOGGED_FIELD_LABELS = { title: "名前" };
+
     // 【前提】issueId は名前を変更したいノードのid。
     // 【処理】prompt()で新しい名前を受け取り、空でなければaddIssueで保存する
     //   （モーダル・ダイアログ一覧P7：右クリックメニュー「名前を変更」に対応）。
-    // 【結果】保存後、パネルを再描画する。
+    // 【結果】保存後、変更履歴を記録し、パネルを再描画する。
     async function handleRenameIssueButtonClick(issueId) {
       const issueList = await getIssuesByProject(currentSelectedProjectId);
       const existingIssue = issueList.find((issue) => issue.id === issueId);
       if (!existingIssue) return;
       const newTitle = window.prompt("新しいノード名を入力してください", existingIssue.title);
       if (!newTitle) return;
-      await addIssue({ ...existingIssue, title: newTitle });
+      const issueToSave = { ...existingIssue, title: newTitle };
+      await addIssue(issueToSave);
+      await recordChangelogEntry("edit", issueToSave.projectId, "issues", "マインドマップノード", issueToSave.id, issueToSave.title, existingIssue, issueToSave, ISSUE_LOGGED_FIELD_LABELS);
       await refreshMindmapPanel(currentSelectedProjectId);
     }
 
     // 【前提】parentIssueId は子ノードを追加したい親ノードのid。
     // 【処理】parentNodeIdをparentIssueIdに固定した新規ノードを、親の近くの座標に作成する
     //   （モーダル・ダイアログ一覧P7：右クリックメニュー「子ノード追加」に対応）。
-    // 【結果】保存後、パネルを再描画する。
+    // 【結果】保存後、変更履歴を記録し、パネルを再描画する。
     async function handleAddChildIssueButtonClick(parentIssueId) {
       const issueList = await getIssuesByProject(currentSelectedProjectId);
       const parentIssue = issueList.find((issue) => issue.id === parentIssueId);
@@ -4149,7 +4327,7 @@
       const childTitle = window.prompt("子ノードのタイトルを入力してください");
       if (!childTitle) return;
       const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
-      await addIssue({
+      const issueToSave = {
         id: generateId(),
         projectId: currentSelectedProjectId,
         title: childTitle,
@@ -4158,7 +4336,9 @@
         y: parentIssue.y + 60,
         color: MINDMAP_NODE_COLORS[colorIndex],
         order: 0,
-      });
+      };
+      await addIssue(issueToSave);
+      await recordChangelogEntry("add", issueToSave.projectId, "issues", "マインドマップノード", issueToSave.id, issueToSave.title, null, issueToSave, ISSUE_LOGGED_FIELD_LABELS);
       await refreshMindmapPanel(currentSelectedProjectId);
     }
 
@@ -4166,7 +4346,7 @@
     // 【処理】siblingIssueIdと同じparentNodeIdを持つ新規ノードを、基準ノードの近くの座標に
     //   作成する（モーダル・ダイアログ一覧P7：右クリックメニュー「兄弟ノード追加」に対応）。
     //   基準ノードがルート（parentNodeId:null）の場合は、新規ノードもルートとして作る。
-    // 【結果】保存後、パネルを再描画する。
+    // 【結果】保存後、変更履歴を記録し、パネルを再描画する。
     async function handleAddSiblingIssueButtonClick(siblingIssueId) {
       const issueList = await getIssuesByProject(currentSelectedProjectId);
       const siblingIssue = issueList.find((issue) => issue.id === siblingIssueId);
@@ -4174,7 +4354,7 @@
       const newTitle = window.prompt("兄弟ノードのタイトルを入力してください");
       if (!newTitle) return;
       const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
-      await addIssue({
+      const issueToSave = {
         id: generateId(),
         projectId: currentSelectedProjectId,
         title: newTitle,
@@ -4183,7 +4363,9 @@
         y: siblingIssue.y + 80,
         color: MINDMAP_NODE_COLORS[colorIndex],
         order: 0,
-      });
+      };
+      await addIssue(issueToSave);
+      await recordChangelogEntry("add", issueToSave.projectId, "issues", "マインドマップノード", issueToSave.id, issueToSave.title, null, issueToSave, ISSUE_LOGGED_FIELD_LABELS);
       await refreshMindmapPanel(currentSelectedProjectId);
     }
 
@@ -4531,10 +4713,18 @@
         if (event.target.id === "postCommentButton") handlePostCommentButtonClick();
       });
 
-      // P6：変更履歴のフィルタタブ。
-      for (const filterButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
+      // P6：変更履歴のフィルタタブ・全削除ボタン・「戻す」ボタン（後者2つはイベント委譲。
+      //   パネルはフィルタ切替や復元のたびに作り直されるため）。
+      for (const filterButton of document.querySelectorAll("#changelogFilterTabs [data-changelog-filter]")) {
         filterButton.addEventListener("click", () => handleChangelogFilterClick(filterButton.dataset.changelogFilter, filterButton));
       }
+      document.getElementById("clearChangelogButton").addEventListener("click", handleClearChangelogButtonClick);
+      document.getElementById("changelogPanelBody").addEventListener("click", (event) => {
+        const restoreButton = event.target.closest('[data-action="restore-log"]');
+        if (!restoreButton) return;
+        const item = restoreButton.closest("[data-entry-id]");
+        if (item) handleRestoreFromLogButtonClick(item.dataset.entryId);
+      });
 
       const projectList = await getAllProjects();
       await refreshProjectSelectDropdown();
