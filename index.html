@@ -3154,8 +3154,6 @@
     }
 
     // ===== P6：変更履歴パネル =====
-    // 【設計判断】「戻す」機能（snapshotフィールドを1件書き戻す）は複合操作のため別工程とし、
-    //   今回は一覧表示とフィルタタブのみを実装する。
 
     // 現在のフィルタ（"all" | "add" | "edit" | "delete"）。
     let currentChangelogFilter = "all";
@@ -3165,7 +3163,8 @@
     // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件。filter は
     //   "all" | "add" | "edit" | "delete"。
     // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
-    //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。
+    //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。削除ログのみ「戻す」
+    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。
     // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderChangelogEntriesToHtml(changelogEntries, filter) {
       const filteredEntries = changelogEntries
@@ -3179,12 +3178,16 @@
       return filteredEntries
         .map((entry) => {
           const actionLabel = actionLabels[entry.action] || entry.action;
-          return `<div class="panel-list-item">
+          const restoreButtonHtml = entry.action === "delete"
+            ? `<button type="button" class="panel-add-button" data-action="restore-log">戻す</button>`
+            : "";
+          return `<div class="panel-list-item" data-entry-id="${escapeHtmlText(entry.id)}">
             <div class="panel-list-item-main">
               <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
               ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
               <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
             </div>
+            <div class="panel-list-item-actions">${restoreButtonHtml}</div>
           </div>`;
         })
         .join("");
@@ -3217,6 +3220,42 @@
         tabButton.classList.toggle("is-active", tabButton === buttonElement);
       }
       applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
+    }
+
+    // 【前提】entryId は「戻す」を押された変更履歴エントリのid（currentChangelogEntriesに
+    //   含まれること。削除ログのみボタンが表示されるため、通常はaction==="delete"）。
+    // 【処理】確認の上、entry.snapshot（削除直前の全フィールドのコピー）をentry.storeに
+    //   応じたadd*関数でそのまま書き戻す（データモデル設計6章：snapshotは削除時点の
+    //   完全なコピーのため、putし直せば元の状態に戻る）。復元操作自体は新たな変更履歴として
+    //   記録しない（「戻す」を繰り返すたびにログが増え続けるのを防ぐため）。この単純な
+    //   書き戻しには限界があり、連鎖削除で一緒に消えた子スケジュール・コメント等の
+    //   関連データまでは復元しない（単一レコードの復元に留まる、既知の非整合）。
+    // 【結果】snapshotが無ければ案内のみ表示し何もしない。復元後は対象パネルと
+    //   変更履歴パネルを再描画する。
+    async function handleRestoreFromLogButtonClick(entryId) {
+      const entry = currentChangelogEntries.find((changelogEntry) => changelogEntry.id === entryId);
+      if (!entry) return;
+      if (!entry.snapshot) {
+        window.alert("復元データがありません");
+        return;
+      }
+      if (!window.confirm(`「${entry.itemName}」（${entry.storeLabel}）をこの時点の状態に戻しますか？`)) return;
+
+      if (entry.store === "projects") {
+        await addProject(entry.snapshot);
+        await refreshProjectSelectDropdown();
+      } else if (entry.store === "schedules") {
+        await addSchedule(entry.snapshot);
+        await refreshGanttPanel(currentSelectedProjectId);
+      } else if (entry.store === "tasks") {
+        await addTask(entry.snapshot);
+        await refreshKanbanPanel(currentSelectedProjectId);
+      } else if (entry.store === "issues") {
+        await addIssue(entry.snapshot);
+        await refreshMindmapPanel(currentSelectedProjectId);
+      }
+      window.alert(`「${entry.itemName}」を復元しました`);
+      await refreshChangelogPanel(currentSelectedProjectId);
     }
 
     // refreshGanttPanelと同じ考え方。対象はissues・マインドマップキャンバス。
@@ -4385,10 +4424,17 @@
         if (event.target.id === "postCommentButton") handlePostCommentButtonClick();
       });
 
-      // P6：変更履歴のフィルタタブ。
+      // P6：変更履歴のフィルタタブ・「戻す」ボタン（イベント委譲。パネルはフィルタ切替や
+      //   復元のたびに作り直されるため）。
       for (const filterButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
         filterButton.addEventListener("click", () => handleChangelogFilterClick(filterButton.dataset.changelogFilter, filterButton));
       }
+      document.getElementById("changelogPanelBody").addEventListener("click", (event) => {
+        const restoreButton = event.target.closest('[data-action="restore-log"]');
+        if (!restoreButton) return;
+        const item = restoreButton.closest("[data-entry-id]");
+        if (item) handleRestoreFromLogButtonClick(item.dataset.entryId);
+      });
 
       const projectList = await getAllProjects();
       await refreshProjectSelectDropdown();
