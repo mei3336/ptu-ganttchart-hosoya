@@ -3843,6 +3843,115 @@
       await refreshMindmapPanel(currentSelectedProjectId);
     }
 
+    // ===== マインドマップ：右クリックメニュー =====
+    // 【設計判断】メニューはDOM上に1つだけ常設し（#mindmapContextMenu）、開くたびに
+    //   表示位置（クリック位置）とcurrentContextMenuIssueId（対象ノード）を差し替える。
+    //   モーダルと同じ「入れ物を使い回す」設計に揃えている。
+
+    // 現在メニューが開いている対象ノードのissueId。閉じている間はnull。
+    let currentContextMenuIssueId = null;
+
+    // 【前提】issueId は右クリックされたノードのid。clientX/clientY はイベント発生位置。
+    // 【処理】メニューを対象ノードのidと紐づけて、クリックされた座標に表示する。
+    // 【結果】右クリックメニューが画面上に表示される。
+    function openMindmapContextMenu(issueId, clientX, clientY) {
+      currentContextMenuIssueId = issueId;
+      const menuElement = document.getElementById("mindmapContextMenu");
+      menuElement.style.left = `${clientX}px`;
+      menuElement.style.top = `${clientY}px`;
+      menuElement.hidden = false;
+    }
+
+    // 【前提】なし。
+    // 【処理】メニューを非表示にし、対象ノードの紐づけを解除する。
+    // 【結果】右クリックメニューが閉じる。
+    function closeMindmapContextMenu() {
+      currentContextMenuIssueId = null;
+      document.getElementById("mindmapContextMenu").hidden = true;
+    }
+
+    // 【前提】issueId は名前を変更したいノードのid。
+    // 【処理】prompt()で新しい名前を受け取り、空でなければaddIssueで保存する
+    //   （モーダル・ダイアログ一覧P7：右クリックメニュー「名前を変更」に対応）。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleRenameIssueButtonClick(issueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const existingIssue = issueList.find((issue) => issue.id === issueId);
+      if (!existingIssue) return;
+      const newTitle = window.prompt("新しいノード名を入力してください", existingIssue.title);
+      if (!newTitle) return;
+      await addIssue({ ...existingIssue, title: newTitle });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】parentIssueId は子ノードを追加したい親ノードのid。
+    // 【処理】parentNodeIdをparentIssueIdに固定した新規ノードを、親の近くの座標に作成する
+    //   （モーダル・ダイアログ一覧P7：右クリックメニュー「子ノード追加」に対応）。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleAddChildIssueButtonClick(parentIssueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const parentIssue = issueList.find((issue) => issue.id === parentIssueId);
+      if (!parentIssue) return;
+      const childTitle = window.prompt("子ノードのタイトルを入力してください");
+      if (!childTitle) return;
+      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
+      await addIssue({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: childTitle,
+        parentNodeId: parentIssueId,
+        x: parentIssue.x + 120,
+        y: parentIssue.y + 60,
+        color: MINDMAP_NODE_COLORS[colorIndex],
+        order: 0,
+      });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】siblingIssueId は兄弟ノードを追加したい基準ノードのid。
+    // 【処理】siblingIssueIdと同じparentNodeIdを持つ新規ノードを、基準ノードの近くの座標に
+    //   作成する（モーダル・ダイアログ一覧P7：右クリックメニュー「兄弟ノード追加」に対応）。
+    //   基準ノードがルート（parentNodeId:null）の場合は、新規ノードもルートとして作る。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleAddSiblingIssueButtonClick(siblingIssueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const siblingIssue = issueList.find((issue) => issue.id === siblingIssueId);
+      if (!siblingIssue) return;
+      const newTitle = window.prompt("兄弟ノードのタイトルを入力してください");
+      if (!newTitle) return;
+      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
+      await addIssue({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: newTitle,
+        parentNodeId: siblingIssue.parentNodeId,
+        x: siblingIssue.x,
+        y: siblingIssue.y + 80,
+        color: MINDMAP_NODE_COLORS[colorIndex],
+        order: 0,
+      });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】action は右クリックメニューのdata-action値（"rename"|"add-child"|"add-sibling"|
+    //   "toggle-collapse"|"delete"）。currentContextMenuIssueIdがメニューを開いた時点の
+    //   対象ノードを保持している。
+    // 【処理】メニューを閉じてから、actionに応じた処理へ委譲する。
+    // 【結果】選択した操作が実行される。
+    async function handleMindmapContextMenuAction(action) {
+      const issueId = currentContextMenuIssueId;
+      closeMindmapContextMenu();
+      if (!issueId) return;
+      if (action === "rename") {
+        await handleRenameIssueButtonClick(issueId);
+      } else if (action === "add-child") {
+        await handleAddChildIssueButtonClick(issueId);
+      } else if (action === "add-sibling") {
+        await handleAddSiblingIssueButtonClick(issueId);
+      }
+      // "toggle-collapse"・"delete"はそれぞれ後続の折りたたみ機能・連鎖削除の実装で対応する。
+    }
+
     // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
     // 【処理】現在のプロジェクトのlockedを反転させて保存し、画面のロック表示を更新する
     //   （基本設計書3.3節：ロックONで薄赤帯表示・スケジュール追加ボタン無効化）。
@@ -3937,6 +4046,27 @@
       });
       document.addEventListener("pointermove", handleMindmapNodePointerMove);
       document.addEventListener("pointerup", handleMindmapNodePointerUp);
+      // マインドマップの右クリックメニュー。
+      document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
+        const node = event.target.closest(".mindmap-node");
+        if (!node) return;
+        event.preventDefault();
+        openMindmapContextMenu(node.dataset.issueId, event.clientX, event.clientY);
+      });
+      document.getElementById("mindmapContextMenu").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (button) handleMindmapContextMenuAction(button.dataset.action);
+      });
+      // メニューの外側をクリック、またはEscapeキーで閉じる。
+      document.addEventListener("click", (event) => {
+        const menuElement = document.getElementById("mindmapContextMenu");
+        if (!menuElement.hidden && !menuElement.contains(event.target)) {
+          closeMindmapContextMenu();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeMindmapContextMenu();
+      });
       document.getElementById("closeKanbanPanelButton").addEventListener("click", () => {
         closeSlidePanel("kanbanSlidePanel");
         document.getElementById("switchToKanbanButton").classList.remove("is-active");
