@@ -902,6 +902,13 @@
       border-bottom: 1px solid var(--color-border);
     }
 
+    .changelog-summary {
+      padding: 6px 16px;
+      font-size: 12px;
+      color: var(--color-text-light);
+      border-bottom: 1px solid var(--color-border);
+    }
+
     .changelog-action-badge {
       display: inline-block;
       padding: 1px 6px;
@@ -1065,7 +1072,9 @@
         <button type="button" class="toolbar-button" data-changelog-filter="add">追加</button>
         <button type="button" class="toolbar-button" data-changelog-filter="edit">変更</button>
         <button type="button" class="toolbar-button" data-changelog-filter="delete">削除</button>
+        <button type="button" class="toolbar-button" id="clearChangelogButton">全削除</button>
       </div>
+      <div id="changelogSummary" class="changelog-summary"></div>
       <div id="changelogPanelBody"></div>
     </div>
   </aside>
@@ -3197,17 +3206,49 @@
       document.getElementById("changelogPanelBody").innerHTML = bodyHtml;
     }
 
+    // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件（フィルタで絞り込む前）。
+    // 【処理】action別の件数を数える（基本設計書8.1節：フィルタ下に全件数の内訳を表示する）。
+    //   フィルタタブの選択状態に関わらず、常に全件での内訳を示す。
+    // 【結果】「全{n}件（追加{n}・変更{n}・削除{n}）」の文字列を返す。
+    function renderChangelogSummaryToHtml(changelogEntries) {
+      const addCount = changelogEntries.filter((entry) => entry.action === "add").length;
+      const editCount = changelogEntries.filter((entry) => entry.action === "edit").length;
+      const deleteCount = changelogEntries.filter((entry) => entry.action === "delete").length;
+      return `全${changelogEntries.length}件（追加${addCount}・変更${editCount}・削除${deleteCount}）`;
+    }
+
+    function applyChangelogSummary(summaryText) {
+      document.getElementById("changelogSummary").textContent = summaryText;
+    }
+
     // 【前提】projectId はnull、または実在するプロジェクトのid。
     // 【処理】getChangelogByProjectで取得してcurrentChangelogEntriesにキャッシュし、
-    //   現在のフィルタで描画する。
+    //   現在のフィルタで一覧を、フィルタに関わらず全件の内訳をサマリーとして描画する。
     // 【結果】変更履歴パネルの表示が最新の状態に更新される。
     async function refreshChangelogPanel(projectId) {
       if (!projectId) {
+        applyChangelogSummary("");
         applyChangelogPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
         return;
       }
       currentChangelogEntries = await getChangelogByProject(projectId);
+      applyChangelogSummary(renderChangelogSummaryToHtml(currentChangelogEntries));
       applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
+    }
+
+    // 【前提】currentSelectedProjectId・currentChangelogEntriesが設定済みであること。
+    // 【処理】0件なら案内のみ表示して終了する。1件以上あれば件数を明示した確認ダイアログの上で
+    //   clearChangelogByProjectする（詳細設計書3.6.3）。
+    // 【結果】確認OK時、このプロジェクトの変更履歴がすべて削除され、パネルが再描画される。
+    async function handleClearChangelogButtonClick() {
+      if (currentChangelogEntries.length === 0) {
+        window.alert("履歴がありません");
+        return;
+      }
+      if (!window.confirm(`${currentChangelogEntries.length}件の変更履歴を削除しますか？`)) return;
+      await clearChangelogByProject(currentSelectedProjectId);
+      window.alert("変更履歴を削除しました");
+      await refreshChangelogPanel(currentSelectedProjectId);
     }
 
     // 【前提】filter は "all" | "add" | "edit" | "delete"。buttonElement はクリックされたボタン。
@@ -3216,7 +3257,7 @@
     // 【結果】変更履歴パネルの表示が新しいフィルタの内容になる。
     function handleChangelogFilterClick(filter, buttonElement) {
       currentChangelogFilter = filter;
-      for (const tabButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
+      for (const tabButton of document.querySelectorAll("#changelogFilterTabs [data-changelog-filter]")) {
         tabButton.classList.toggle("is-active", tabButton === buttonElement);
       }
       applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
@@ -4424,11 +4465,12 @@
         if (event.target.id === "postCommentButton") handlePostCommentButtonClick();
       });
 
-      // P6：変更履歴のフィルタタブ・「戻す」ボタン（イベント委譲。パネルはフィルタ切替や
-      //   復元のたびに作り直されるため）。
-      for (const filterButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
+      // P6：変更履歴のフィルタタブ・全削除ボタン・「戻す」ボタン（後者2つはイベント委譲。
+      //   パネルはフィルタ切替や復元のたびに作り直されるため）。
+      for (const filterButton of document.querySelectorAll("#changelogFilterTabs [data-changelog-filter]")) {
         filterButton.addEventListener("click", () => handleChangelogFilterClick(filterButton.dataset.changelogFilter, filterButton));
       }
+      document.getElementById("clearChangelogButton").addEventListener("click", handleClearChangelogButtonClick);
       document.getElementById("changelogPanelBody").addEventListener("click", (event) => {
         const restoreButton = event.target.closest('[data-action="restore-log"]');
         if (!restoreButton) return;
