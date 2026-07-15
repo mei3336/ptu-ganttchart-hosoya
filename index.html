@@ -4,8 +4,490 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GanttForge再現アプリ</title>
+  <!-- UIデザイン仕様書1.4節「フォントファミリー：'DM Sans'（Google Fonts等からの読み込みを想定）」に
+       基づきCDN経由で読み込む。ネットワーク遮断環境では読込に失敗するが、その場合はフォールバックの
+       システムフォントで表示される（フォント読込の成否がアプリの動作自体には影響しない）。 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ===== デザイントークン（UIデザイン仕様書1章の値をそのまま採用） ===== */
+    :root {
+      --color-bg-page: #F3F4F6;
+      --color-white: #FFFFFF;
+      --color-surface-2: #F9FAFB;
+      --color-surface-3: #E5E7EB;
+      --color-border: #D1D5DB;
+      --color-border-dark: #9CA3AF;
+      --color-primary-navy: #1E40AF;
+      --color-primary-light: #EFF6FF;
+      --color-accent: #2563EB;
+      --color-accent-hover: #1D4ED8;
+      --color-danger: #DC2626;
+      --color-danger-light: #FEF2F2;
+      --color-text-dark: #111827;
+      --color-text-mid: #374151;
+      --color-text-light: #6B7280;
+
+      --shadow-small: 0 1px 3px rgba(0, 0, 0, .10), 0 1px 2px rgba(0, 0, 0, .06);
+      --shadow-medium: 0 4px 16px rgba(0, 0, 0, .10), 0 2px 6px rgba(0, 0, 0, .06);
+      --shadow-large: 0 16px 48px rgba(0, 0, 0, .14), 0 4px 12px rgba(0, 0, 0, .08);
+
+      --radius-standard: 8px;
+      --gantt-row-height: 44px;
+      --gantt-header-height: 42px;
+      --timeline-header-height: 82px;
+      --milestone-marker-height: 20px;
+      --wbs-panel-width: 520px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--color-bg-page);
+      color: var(--color-text-dark);
+      font-family: 'DM Sans', -apple-system, "Segoe UI", "Hiragino Sans", sans-serif;
+      font-size: 13px;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    /* ===== ヘッダー（基本設計書2.1節：2段構成） ===== */
+    .app-header-primary,
+    .app-header-secondary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+    }
+
+    .app-header-primary {
+      height: 52px;
+      background: var(--color-white);
+      border-bottom: 1px solid var(--color-border);
+      box-shadow: var(--shadow-small);
+    }
+
+    .app-header-secondary {
+      height: 34px;
+      background: var(--color-surface-2);
+      border-bottom: 1px solid var(--color-border);
+      font-size: 12px;
+    }
+
+    .header-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .app-logo {
+      font-weight: 700;
+      color: var(--color-accent);
+      font-size: 15px;
+      margin-right: 4px;
+    }
+
+    /* 「ロック」トグルON時に第1・第2ヘッダーとガントの間へ挿入する帯（基本設計書3.3節）。 */
+    #lockBand {
+      background: var(--color-danger-light);
+      border-bottom: 2px solid var(--color-danger);
+      color: var(--color-danger);
+      padding: 4px 16px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    #lockBand[hidden] {
+      display: none;
+    }
+
+    button.toolbar-button {
+      padding: 4px 10px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    button.toolbar-button:hover:not(:disabled) {
+      background: var(--color-primary-light);
+      border-color: var(--color-accent);
+    }
+
+    button.toolbar-button.is-active {
+      background: var(--color-accent);
+      color: var(--color-white);
+      border-color: var(--color-accent);
+    }
+
+    button.toolbar-button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    #createProjectButton {
+      padding: 5px 12px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-accent);
+      cursor: pointer;
+    }
+
+    #createProjectButton:hover {
+      background: var(--color-accent-hover);
+      color: var(--color-white);
+    }
+
+    select#projectSelectDropdown {
+      padding: 4px 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-text-dark);
+    }
+
+    /* ===== メイン作業領域：WBSパネル＋ガントチャート（UIデザイン仕様書2.1節） ===== */
+    .main-workspace {
+      display: flex;
+      align-items: flex-start;
+    }
+
+    .wbs-panel {
+      width: var(--wbs-panel-width);
+      flex: 0 0 var(--wbs-panel-width);
+      background: var(--color-white);
+      border-right: 1px solid var(--color-border);
+    }
+
+    .wbs-header-row {
+      height: var(--timeline-header-height);
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 0 8px 6px;
+      font-weight: 600;
+      color: var(--color-primary-navy);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+    }
+
+    .wbs-header-row .wbs-column-name {
+      flex: 1;
+    }
+
+    .wbs-header-row .wbs-column-extra {
+      width: 84px;
+      flex: 0 0 84px;
+      font-size: 12px;
+    }
+
+    .wbs-row {
+      height: var(--gantt-row-height);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+      border-bottom: 1px solid var(--color-border);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .wbs-row:nth-child(even) {
+      background: var(--color-surface-2);
+    }
+
+    .wbs-row .wbs-column-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .wbs-row .wbs-column-extra {
+      width: 84px;
+      flex: 0 0 84px;
+      font-size: 12px;
+      color: var(--color-text-mid);
+    }
+
+    .gantt-scroll-area {
+      flex: 1;
+      overflow-x: auto;
+      background: var(--color-white);
+    }
+
+    .gantt-timeline-header {
+      height: var(--timeline-header-height);
+      position: relative;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+    }
+
+    .gantt-month-label {
+      position: absolute;
+      top: 0;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      padding-left: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--color-primary-navy);
+      border-right: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .gantt-day-column-header {
+      position: absolute;
+      top: 40px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--color-text-light);
+      border-right: 1px solid var(--color-surface-3);
+    }
+
+    .gantt-day-column-header.is-saturday {
+      background: rgba(37, 99, 235, .08);
+      color: var(--color-accent);
+    }
+
+    .gantt-day-column-header.is-sunday {
+      background: rgba(220, 38, 38, .08);
+      color: var(--color-danger);
+    }
+
+    .gantt-body {
+      position: relative;
+    }
+
+    .gantt-row-background {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: var(--gantt-row-height);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .gantt-row-background.is-even-row {
+      background: var(--color-surface-2);
+    }
+
+    .gantt-day-column-bg {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-right: 1px solid var(--color-surface-3);
+    }
+
+    .gantt-day-column-bg.is-saturday {
+      background: rgba(37, 99, 235, .05);
+    }
+
+    .gantt-day-column-bg.is-sunday {
+      background: rgba(220, 38, 38, .05);
+    }
+
+    /* バーの視覚仕様（UIデザイン仕様書3章）：親行は太め・角丸大きめで行中央、
+       子（葉）行は薄めで行の65%あたりの位置。完了ステータスは不透明度を下げる。 */
+    .gantt-bar {
+      position: absolute;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      color: var(--color-white);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      box-shadow: var(--shadow-small);
+    }
+
+    .gantt-bar.is-parent-bar {
+      border-radius: 8px;
+    }
+
+    .gantt-bar.is-done-status {
+      opacity: .55;
+    }
+
+    .gantt-milestone-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      border-left: 1px dashed var(--color-border-dark);
+    }
+
+    .gantt-milestone-diamond {
+      position: absolute;
+      top: 6px;
+      width: var(--milestone-marker-height);
+      height: var(--milestone-marker-height);
+      background: var(--color-danger);
+      transform: translateX(-10px) rotate(45deg);
+      border-radius: 2px;
+    }
+
+    /* ===== カンバン（タスク管理） ===== */
+    .kanban-board {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .kanban-column {
+      flex: 1;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      padding: 8px;
+    }
+
+    .kanban-column h3 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      color: var(--color-text-mid);
+    }
+
+    .kanban-card {
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-small);
+      padding: 8px;
+      margin-bottom: 8px;
+    }
+
+    /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
+    .mindmap-canvas {
+      position: relative;
+      height: 480px;
+      margin: 16px;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      overflow: auto;
+    }
+
+    .mindmap-edge {
+      position: absolute;
+      height: 1px;
+      background: var(--color-border-dark);
+      transform-origin: 0 0;
+    }
+
+    .mindmap-node {
+      position: absolute;
+      padding: 6px 12px;
+      border-radius: 16px;
+      color: var(--color-white);
+      font-size: 12px;
+      white-space: nowrap;
+      box-shadow: var(--shadow-small);
+      transform: translate(-50%, -50%);
+    }
+
+    .panel-add-button {
+      margin: 12px 16px 0;
+      padding: 6px 12px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-accent);
+      cursor: pointer;
+    }
+
+    .panel-add-button:hover {
+      background: var(--color-accent-hover);
+      color: var(--color-white);
+    }
+
+    .empty-state-message {
+      color: var(--color-text-light);
+      padding: 16px;
+    }
+  </style>
 </head>
 <body>
+  <header class="app-header-primary">
+    <div class="header-group">
+      <span class="app-logo">GanttForge</span>
+      <label for="projectSelectDropdown">プロジェクト：</label>
+      <select id="projectSelectDropdown"></select>
+      <button id="createProjectButton" type="button">＋ 新規プロジェクト</button>
+    </div>
+    <div class="header-group">
+      <!-- データ取込／データ出力／PDF出力／Excel出力は今回のスコープ外（別工程）。
+           視覚的な再現のみ行い、クリックしても何も起きない旨をhandleOutOfScopeButtonClickで示す。 -->
+      <button class="toolbar-button" type="button" data-out-of-scope-label="データ取込">データ取込</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="データ出力">データ出力</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="PDF出力">PDF出力</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="Excel出力">Excel出力</button>
+    </div>
+  </header>
+
+  <header class="app-header-secondary">
+    <div class="header-group">
+      <button id="lockToggleButton" class="toolbar-button" type="button">🔒 ロック</button>
+      <button id="addScheduleButton" class="toolbar-button" type="button">＋ スケジュール追加</button>
+      <!-- 表示粒度は「日」のみ実装（週/月表示は別工程）。ボタンは視覚的に揃えるが「日」以外は無効化する。 -->
+      <button class="toolbar-button is-active" type="button" disabled>日</button>
+      <button class="toolbar-button" type="button" disabled>週</button>
+      <button class="toolbar-button" type="button" disabled>1ヶ月</button>
+      <button class="toolbar-button" type="button" disabled>3ヶ月</button>
+      <button id="todayButton" class="toolbar-button" type="button">今日</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="全て開く・全て閉じる">全て開く／閉じる</button>
+      <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
+      <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
+      <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="マイルストーン管理">マイルストーン</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="プロジェクト編集">編集</button>
+    </div>
+    <div class="header-group">
+      <!-- スナップショット／即時メモ／メモ／コメント／変更履歴はサイドパネル機能のため今回のスコープ外。 -->
+      <button class="toolbar-button" type="button" data-out-of-scope-label="スナップショット">スナップショット</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="即時メモ">即時メモ</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="メモ">メモ</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="コメント">コメント</button>
+      <button class="toolbar-button" type="button" data-out-of-scope-label="変更履歴">変更履歴</button>
+      <button id="switchToMindmapButton" class="toolbar-button" type="button">マインドマップ</button>
+      <button id="switchToKanbanButton" class="toolbar-button" type="button">タスク管理</button>
+    </div>
+  </header>
+
+  <div id="lockBand" hidden>🔒 ロック中 — 編集操作は無効です</div>
+
+  <main>
+    <section id="ganttPanel">
+      <div class="main-workspace">
+        <div id="wbsPanel" class="wbs-panel"></div>
+        <div class="gantt-scroll-area">
+          <div id="ganttPanelBody"></div>
+        </div>
+      </div>
+    </section>
+    <section id="kanbanPanel" hidden>
+      <button id="addTaskButton" class="panel-add-button" type="button">＋ タスク追加</button>
+      <div id="kanbanPanelBody"></div>
+    </section>
+    <section id="mindmapPanel" hidden>
+      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
+      <div id="mindmapPanelBody"></div>
+    </section>
+  </main>
+
   <script>
     "use strict";
 
@@ -627,6 +1109,911 @@
       const transaction = db.transaction(STORE_SNAPSHOTS, "readwrite");
       const store = transaction.objectStore(STORE_SNAPSHOTS);
       return promisifyRequest(store.delete(snapshotId), transaction);
+    }
+
+    // ===== 複合操作（複数ストアにまたがる処理）の共通ユーティリティ =====
+
+    // 【前提】呼び出し元は新規レコードのidをまだ持っていないこと。
+    // 【処理】タイムスタンプ＋ランダム文字列でidを生成する（データモデル設計1章の方針：
+    //   autoIncrementは同一DB内でしか一意性を保証しないため、JSONインポート等で他環境発行の
+    //   idと衝突しないよう、アプリ側で一意な文字列idを発行する）。
+    //   これまでの各CRUD関数（addProject等）はid採番済みのオブジェクトを受け取る前提にして
+    //   いたため、複合操作（連鎖削除のログ記録等）で新規レコードを作る段になって
+    //   初めてid発行そのものが必要になった。そのため、ここでこの関数を追加する。
+    // 【結果】十分に一意な文字列idを返す。
+    function generateId() {
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    // 変更履歴（changelog）に記録する対象ストア（データモデル設計6章・基本設計書8.1節）。
+    // 「保存/削除のたびに自動でログを記録する仕組み（writeLog相当）」自体はまだ実装しておらず
+    // 別工程とするが、この定数は「連鎖削除がどのストアの操作をログに残すべきか」を
+    // deleteScheduleCascade/deleteIssueCascade が判断する根拠として、ここでは参照用に置く。
+    const LOGGED_STORES = ["projects", "schedules", "tasks", "issues"];
+
+    // 【前提】scheduleId は取得したいスケジュールの id。
+    // 【処理】主キー(id)で1件を直接取得する（絞り込みではなく1件特定のため、インデックス不要）。
+    //   schedules の既存CRUDには「idで1件取得」が無かったが、連鎖削除・日付再計算の複合操作で
+    //   「特定のスケジュール1件の最新状態」を読む必要があるため、ここで追加する。
+    // 【結果】見つかった場合はそのオブジェクトを、存在しない場合は undefined を resolve する。
+    async function getScheduleById(scheduleId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SCHEDULES, "readonly");
+      const store = transaction.objectStore(STORE_SCHEDULES);
+      return promisifyRequest(store.get(scheduleId), transaction);
+    }
+
+    // 【設計判断：祖先日付の再計算をなぜ独立した関数にするか】
+    //   基本設計書4.3節「子の開始日・終了日を変更すると、親の日付は全子の最早開始日〜最遅終了日に
+    //   自動更新され、上位階層へも再帰的に伝播する」は、連鎖削除に限らず、将来スケジュールの
+    //   日付編集機能（バーのドラッグ等）でも同じ処理が必要になる（詳細設計書3.2.3節
+    //   syncParentDates/syncAncestorDates相当）。そのため削除処理に埋め込まず、
+    //   「対象1件の日付を、その子に合わせて再計算し、必要なら親へ伝播する」という
+    //   単独の責務を持つ関数として切り出す。
+    //
+    // 【前提】scheduleId は日付を再計算したい対象の id（削除された行の「元の親」から呼び出す想定）。
+    // 【処理】対象の直下の子（by_parentIdインデックス）を取得し、日付を持つ子だけを対象に
+    //   「最早開始日〜最遅終了日」を計算して対象自身に保存する。
+    //   ※基本設計書4.3節「子を全て削除した場合、親の日付は再計算・リセットされない」の仕様どおり、
+    //   日付を持つ子が1件も残っていない場合は何もしない（対象の日付をそのまま残す）。
+    //   更新できた場合は、対象の親についても同じ処理を再帰的に行い、祖先全体へ伝播させる。
+    // 【結果】更新が完了した時点で resolve する（戻り値なし）。
+    async function syncAncestorDates(scheduleId) {
+      const schedule = await getScheduleById(scheduleId);
+      if (!schedule) return;
+
+      const children = await getChildSchedules(scheduleId);
+      const childrenWithDates = children.filter((child) => child.startDate && child.endDate);
+      if (childrenWithDates.length === 0) {
+        return;
+      }
+
+      const startDates = childrenWithDates.map((child) => child.startDate).sort();
+      const endDates = childrenWithDates.map((child) => child.endDate).sort();
+      const earliestStartDate = startDates[0];
+      const latestEndDate = endDates[endDates.length - 1];
+      await addSchedule({ ...schedule, startDate: earliestStartDate, endDate: latestEndDate });
+
+      if (schedule.parentId !== null && schedule.parentId !== undefined) {
+        await syncAncestorDates(schedule.parentId);
+      }
+    }
+
+    // 【設計判断：スケジュールの連鎖削除】
+    //   基本設計書L155-157・L200、シーケンス図集「3. 親スケジュール削除」の仕様どおり、
+    //   1つの複合操作として次の3段階で実装する。
+    //   1. 読み切り：getSchedulesByProjectでプロジェクト内の全件を1回だけ読み、
+    //      アプリ層のツリー走査で「起点＋全子孫」のidを集める
+    //      （データモデル設計6章：複数ストアにまたがる書き込みは、先に読み切ってから行う）。
+    //   2. 書き込み：集めた各idについて、紐づくコメントを削除→スケジュール自体を削除→
+    //      個別に削除ログ(changelog)を記録する（親・子・孫それぞれ個別にログが残る仕様＝L200）。
+    //   3. 起点スケジュールの「元の親」がまだ存在するなら、syncAncestorDatesで日付を再計算する。
+    //
+    // 【前提】scheduleId は削除起点のスケジュール id。projectId は所属プロジェクトの id
+    //   （呼び出し側は現在開いているプロジェクトを把握しているため受け取る）。
+    // 【処理】上記の3段階を実行する。
+    // 【結果】実際に削除されたスケジュールidの配列を resolve する（対象が存在しなければ空配列）。
+    async function deleteScheduleCascade(scheduleId, projectId) {
+      const allSchedules = await getSchedulesByProject(projectId);
+      const scheduleById = new Map(allSchedules.map((schedule) => [schedule.id, schedule]));
+      const targetSchedule = scheduleById.get(scheduleId);
+      if (!targetSchedule) {
+        return [];
+      }
+
+      const childSchedulesByParentId = new Map();
+      for (const schedule of allSchedules) {
+        if (schedule.parentId === null || schedule.parentId === undefined) continue;
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
+
+      const idsToDelete = [];
+      let frontier = [targetSchedule];
+      while (frontier.length > 0) {
+        const nextFrontier = [];
+        for (const node of frontier) {
+          idsToDelete.push(node.id);
+          nextFrontier.push(...(childSchedulesByParentId.get(node.id) || []));
+        }
+        frontier = nextFrontier;
+      }
+
+      for (const id of idsToDelete) {
+        const schedule = scheduleById.get(id);
+        const comments = await getCommentsByTask(id);
+        for (const comment of comments) {
+          await deleteComment(comment.id);
+        }
+        await deleteSchedule(id);
+        await addChangelogEntry({
+          id: generateId(),
+          projectId: schedule.projectId,
+          action: "delete",
+          store: "schedules",
+          storeLabel: "スケジュール",
+          itemId: schedule.id,
+          itemName: schedule.name,
+          changes: [],
+          snapshot: schedule,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      const originalParentId = targetSchedule.parentId;
+      if (originalParentId !== null && originalParentId !== undefined) {
+        await syncAncestorDates(originalParentId);
+      }
+
+      return idsToDelete;
+    }
+
+    // 【設計判断：マインドマップノードの連鎖削除】
+    //   詳細設計書3.5.3節の仕様どおり、対象ノード＋子孫ノードを収集して削除する。
+    //   deleteScheduleCascade と同じ考え方だが、issues には次の3点の違いがある：
+    //   ・comments のような紐づく別ストアが無い（削除するのはissues自体のみ）
+    //   ・日付の概念が無いため、祖先の再計算（syncAncestorDates相当）は不要
+    //   ・parentNodeId にインデックスが無いため、子孫収集は getIssuesByProject の結果を
+    //     アプリ層でツリー走査する（issues側のCRUD設計方針と同じ理由）
+    //   なお issues は LOGGED_STORES に含まれるため、schedules と同様に個別の削除ログを残す。
+    //
+    // 【前提】issueId は削除起点のノード id。projectId は所属プロジェクトの id。
+    // 【処理】起点＋全子孫ノードを収集し、それぞれ削除・削除ログ記録を行う。
+    // 【結果】実際に削除されたノードidの配列を resolve する（対象が存在しなければ空配列）。
+    async function deleteIssueCascade(issueId, projectId) {
+      const allIssues = await getIssuesByProject(projectId);
+      const issueById = new Map(allIssues.map((issue) => [issue.id, issue]));
+      const targetIssue = issueById.get(issueId);
+      if (!targetIssue) {
+        return [];
+      }
+
+      const childIssuesByParentNodeId = new Map();
+      for (const issue of allIssues) {
+        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
+        if (!childIssuesByParentNodeId.has(issue.parentNodeId)) {
+          childIssuesByParentNodeId.set(issue.parentNodeId, []);
+        }
+        childIssuesByParentNodeId.get(issue.parentNodeId).push(issue);
+      }
+
+      const idsToDelete = [];
+      let frontier = [targetIssue];
+      while (frontier.length > 0) {
+        const nextFrontier = [];
+        for (const node of frontier) {
+          idsToDelete.push(node.id);
+          nextFrontier.push(...(childIssuesByParentNodeId.get(node.id) || []));
+        }
+        frontier = nextFrontier;
+      }
+
+      for (const id of idsToDelete) {
+        const issue = issueById.get(id);
+        await deleteIssue(id);
+        await addChangelogEntry({
+          id: generateId(),
+          projectId: issue.projectId,
+          action: "delete",
+          store: "issues",
+          storeLabel: "マインドマップノード",
+          itemId: issue.id,
+          itemName: issue.title,
+          changes: [],
+          snapshot: issue,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      return idsToDelete;
+    }
+
+    // ===== UI：状態・純粋関数（DOM非依存） =====
+    // 【設計判断】このセクションの関数は「データ配列を受け取り、データ/文字列を返す」だけの
+    //   純粋関数と、実際にDOMへ反映する薄い関数に分ける。前者はdocumentに一切触れないため、
+    //   ブラウザが無い環境（Node.js等）でも配列を渡すだけで動作を検証できる。
+    //
+    // 【今回のスコープ（UIデザイン仕様書・基本設計書2章に基づくメイン画面の忠実再現）】
+    //   実装：2段ヘッダー、WBSパネル(520px)＋ガントチャート本体（日付軸・バー・
+    //   マイルストーンマーカー・親子バーの視覚差・完了時の不透明度・土日の背景色）、
+    //   カンバン、マインドマップ（issueのx,y座標を使った絶対配置＋親子を結ぶ線）。
+    //   静的表示のみ：バーのドラッグリサイズ、カンバンのドラッグ&ドロップ、
+    //   マインドマップのノードドラッグは実装しない。
+    //   別工程：サイドパネル一式（コメント/メモ/即時メモ/スナップショット/変更履歴）、
+    //   モーダル（マイルストーン管理／プロジェクト編集）、インポート/エクスポート、
+    //   表示粒度（週/月）切替、全て開く・閉じるの実際の開閉状態管理。
+    //   これらの未実装ボタンは視覚的には配置し、クリック時は
+    //   handleOutOfScopeButtonClickで「スコープ外」である旨を明示する。
+
+    // 現在選択中のプロジェクトのid。未選択時はnull。
+    let currentSelectedProjectId = null;
+    // 現在選択中のプロジェクトの最新データ（startDate/endDate/locked/milestones参照用）。
+    let currentProjectObject = null;
+    // 列トグル（開始/終了/状態）を再描画する際、DBへ再度問い合わせずに済むようキャッシュする。
+    let currentScheduleTreeRows = [];
+    // 「今日」ボタンでのスクロール位置計算に使う、現在表示中タイムラインの先頭日。
+    let currentTimelineStartDateString = null;
+    // WBSパネルの追加列（開始/終了/状態）の表示状態。基本設計書2.2節の固定順（開始→終了→状態）で
+    // 右側から列を追加する仕様のため、この順序のままレンダリングする。
+    const visibleWbsColumns = { startDate: false, endDate: false, status: false };
+    // 現在表示中のメインビュー（"gantt" | "kanban" | "mindmap"）。
+    let currentMainView = "gantt";
+
+    // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
+    const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
+
+    // ガント1日あたりの描画幅（px）。表示粒度は「日」のみ実装するため固定値とする。
+    const PIXELS_PER_DAY = 32;
+    // ガント1行の高さ（px）。CSS変数 --gantt-row-height と同じ値を保つこと（JS側で絶対配置の
+    // 計算に使うため、CSSだけでなくJS定数としても持つ）。
+    const GANTT_ROW_HEIGHT_PX = 44;
+    const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+    // マインドマップノードの固定カラーパレット（UIデザイン仕様書1.5節・9色）。
+    const MINDMAP_NODE_COLORS = ["#2563EB", "#7C3AED", "#0891B2", "#059669", "#D97706", "#DC2626", "#DB2777", "#EA580C", "#4B5563"];
+
+    // 【前提】rawText はユーザー入力を含みうる未エスケープの文字列（null/undefinedの可能性あり）。
+    // 【処理】HTML特殊文字（& < > " '）を実体参照に置き換え、意図しないタグ・属性の注入を防ぐ。
+    // 【結果】そのままHTML文字列に埋め込んでよいエスケープ済み文字列を返す。
+    function escapeHtmlText(rawText) {
+      return String(rawText ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    // 【前提】scheduleList は同一プロジェクト内のスケジュール全件（親子関係はparentIdで表現）。
+    // 【処理】親→子の順にたどり、各行がツリー上で何階層目か（depthLevel、ルートは0）、
+    //   および子を1件でも持つか（hasChildren）を付与する。同じ親を持つ兄弟同士はorderの昇順に揃える。
+    //   hasChildrenは、ガントのバー描画で「親行の太いバー」と「葉（子なし）行の細いバー」を
+    //   区別するために必要（UIデザイン仕様書3章）。
+    // 【結果】ガントチャートの行として上から順に描画できる配列 {schedule, depthLevel, hasChildren}[] を返す。
+    function buildScheduleTreeRows(scheduleList) {
+      const childSchedulesByParentId = new Map();
+      const rootSchedules = [];
+      for (const schedule of scheduleList) {
+        if (schedule.parentId === null || schedule.parentId === undefined) {
+          rootSchedules.push(schedule);
+          continue;
+        }
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
+
+      const sortByOrder = (a, b) => a.order - b.order;
+      rootSchedules.sort(sortByOrder);
+      for (const childSchedules of childSchedulesByParentId.values()) {
+        childSchedules.sort(sortByOrder);
+      }
+
+      const scheduleTreeRows = [];
+      function appendScheduleAndDescendants(schedule, depthLevel) {
+        const childSchedules = childSchedulesByParentId.get(schedule.id) || [];
+        scheduleTreeRows.push({ schedule, depthLevel, hasChildren: childSchedules.length > 0 });
+        for (const childSchedule of childSchedules) {
+          appendScheduleAndDescendants(childSchedule, depthLevel + 1);
+        }
+      }
+      for (const rootSchedule of rootSchedules) {
+        appendScheduleAndDescendants(rootSchedule, 0);
+      }
+      return scheduleTreeRows;
+    }
+
+    // 【前提】taskList は同一プロジェクト内のタスク全件。
+    // 【処理】status（"backlog"|"doing"|"done"）で3列に振り分け、各列内はorderの昇順に揃える。
+    // 【結果】カンバンの3列分のタスク配列 {backlog, doing, done} を返す。
+    function groupTasksByStatus(taskList) {
+      const sortByOrder = (a, b) => a.order - b.order;
+      return {
+        backlog: taskList.filter((task) => task.status === "backlog").sort(sortByOrder),
+        doing: taskList.filter((task) => task.status === "doing").sort(sortByOrder),
+        done: taskList.filter((task) => task.status === "done").sort(sortByOrder),
+      };
+    }
+
+    // 【前提】dateString は "YYYY-MM-DD" 形式の文字列であること。
+    // 【処理】ローカルタイムゾーンによるずれを避けるため、常にUTC基準のタイムスタンプとして解釈する。
+    // 【結果】その日付のUTC深夜0時のミリ秒タイムスタンプを返す。
+    function parseDateStringToUtcTimestamp(dateString) {
+      const [year, month, day] = dateString.split("-").map(Number);
+      return Date.UTC(year, month - 1, day);
+    }
+
+    // 【前提】startDateString <= endDateString（"YYYY-MM-DD"形式）であること。
+    //   プロジェクトのendDateがstartDateより前という既知の非整合（基本設計書1.3節No.1相当の
+    //   プロジェクト側バリデーション無し仕様）の場合でも、最低1日分は描画できるようにする。
+    // 【処理】startからendまでの日数分、各日の情報（日付文字列・年月・曜日・週末か）を列挙する。
+    // 【結果】タイムライン列として左から順に描画できる配列を返す。
+    function buildGanttTimelineDays(startDateString, endDateString) {
+      const startTimestamp = parseDateStringToUtcTimestamp(startDateString);
+      const endTimestamp = parseDateStringToUtcTimestamp(endDateString);
+      const totalDayCount = Math.max(Math.round((endTimestamp - startTimestamp) / MILLISECONDS_PER_DAY) + 1, 1);
+
+      const timelineDays = [];
+      for (let dayOffset = 0; dayOffset < totalDayCount; dayOffset++) {
+        const currentDate = new Date(startTimestamp + dayOffset * MILLISECONDS_PER_DAY);
+        const dayOfWeek = currentDate.getUTCDay();
+        timelineDays.push({
+          year: currentDate.getUTCFullYear(),
+          month: currentDate.getUTCMonth() + 1,
+          dayOfMonth: currentDate.getUTCDate(),
+          isSaturday: dayOfWeek === 6,
+          isSunday: dayOfWeek === 0,
+        });
+      }
+      return timelineDays;
+    }
+
+    // 【前提】targetDateString/timelineStartDateStringは"YYYY-MM-DD"。
+    // 【処理】タイムライン先頭日から対象日までの経過日数を計算する。
+    // 【結果】経過日数（整数）。範囲外の日付なら負の値、またはタイムラインを超える大きな値になる。
+    function calculateDayOffsetFromTimelineStart(targetDateString, timelineStartDateString) {
+      const targetTimestamp = parseDateStringToUtcTimestamp(targetDateString);
+      const startTimestamp = parseDateStringToUtcTimestamp(timelineStartDateString);
+      return Math.round((targetTimestamp - startTimestamp) / MILLISECONDS_PER_DAY);
+    }
+
+    // 【前提】schedule.startDate/endDateのどちらかが未設定の場合、バーは描画できない
+    //   （データモデル設計3.2節：両方とも必須ではないフィールドのため）。
+    // 【処理】タイムライン先頭日・1日あたりのピクセル幅から、バーのleft/widthをpx単位で計算する。
+    // 【結果】{leftPx, widthPx, durationDays} を返す。日付が無い場合はnullを返す。
+    function calculateBarGeometry(schedule, timelineStartDateString, pixelsPerDay) {
+      if (!schedule.startDate || !schedule.endDate) {
+        return null;
+      }
+      const dayOffsetStart = calculateDayOffsetFromTimelineStart(schedule.startDate, timelineStartDateString);
+      const dayOffsetEnd = calculateDayOffsetFromTimelineStart(schedule.endDate, timelineStartDateString);
+      const durationDays = Math.max(dayOffsetEnd - dayOffsetStart + 1, 1);
+      return { leftPx: dayOffsetStart * pixelsPerDay, widthPx: durationDays * pixelsPerDay, durationDays };
+    }
+
+    // 【前提】milestones は project.milestones（{name, date}の配列）。
+    // 【処理】日付を持つマイルストーンについて、タイムライン上のx座標（px）を計算する。
+    // 【結果】{leftPx, name}[] を返す。
+    function calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay) {
+      return milestones
+        .filter((milestone) => Boolean(milestone.date))
+        .map((milestone) => ({
+          leftPx: calculateDayOffsetFromTimelineStart(milestone.date, timelineStartDateString) * pixelsPerDay,
+          name: milestone.name,
+        }));
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件（親子関係はparentNodeIdで表現）。
+    // 【処理】parentNodeIdが実在する行同士を「親→子」のペアとして列挙する
+    //   （マインドマップの線描画はx,y座標を結ぶ形のため、depthLevelではなくペア単位で扱う）。
+    // 【結果】{fromIssue, toIssue}[] を返す。
+    function buildMindmapEdgeList(issueList) {
+      const issueById = new Map(issueList.map((issue) => [issue.id, issue]));
+      const edges = [];
+      for (const issue of issueList) {
+        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
+        const parentIssue = issueById.get(issue.parentNodeId);
+        if (parentIssue) {
+          edges.push({ fromIssue: parentIssue, toIssue: issue });
+        }
+      }
+      return edges;
+    }
+
+    // 【前提】2点の座標(fromX,fromY)→(toX,toY)。
+    // 【処理】2点間を結ぶ「幅lengthPx・高さ1pxの線」をCSSのtransform:rotateで描画するための
+    //   left/top/width/角度を計算する（線の要素自体はfrom側を起点に、toの向きへ回転させる）。
+    // 【結果】{leftPx, topPx, widthPx, angleDeg} を返す。
+    function calculateEdgeGeometry(fromX, fromY, toX, toY) {
+      const deltaX = toX - fromX;
+      const deltaY = toY - fromY;
+      const lengthPx = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      const angleDeg = (Math.atan2(deltaY, deltaX) * 180) / Math.PI;
+      return { leftPx: fromX, topPx: fromY, widthPx: lengthPx, angleDeg };
+    }
+
+    // 【前提】projectList はプロジェクト全件。selectedProjectId は現在<select>に選ばせたいid。
+    // 【処理】<option>タグのHTML文字列を組み立てる（DOMには触れない）。
+    // 【結果】<select>のinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderProjectOptionsToHtml(projectList, selectedProjectId) {
+      if (projectList.length === 0) {
+        return '<option value="">(プロジェクトがありません)</option>';
+      }
+      return projectList
+        .map((project) => {
+          const isSelectedAttribute = project.id === selectedProjectId ? " selected" : "";
+          return `<option value="${escapeHtmlText(project.id)}"${isSelectedAttribute}>${escapeHtmlText(project.name)}</option>`;
+        })
+        .join("");
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。visibleColumns は
+    //   {startDate, endDate, status} の表示可否。基本設計書2.2節の固定順（開始→終了→状態）で
+    //   右側から列を追加する。
+    // 【処理】WBSパネル（スケジュール名列＋トグルされた追加列）のHTML文字列を組み立てる。
+    // 【結果】wbsPanel要素のinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns) {
+      const headerExtraColumnsHtml = [
+        visibleColumns.startDate ? '<div class="wbs-column-extra">開始日</div>' : "",
+        visibleColumns.endDate ? '<div class="wbs-column-extra">終了日</div>' : "",
+        visibleColumns.status ? '<div class="wbs-column-extra">状態</div>' : "",
+      ].join("");
+      const headerHtml = `<div class="wbs-header-row"><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}</div>`;
+
+      if (scheduleTreeRows.length === 0) {
+        return headerHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
+      }
+
+      const rowsHtml = scheduleTreeRows
+        .map(({ schedule, depthLevel }) => {
+          const indentedName = "　".repeat(depthLevel) + escapeHtmlText(schedule.name);
+          const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
+          const extraColumnsHtml = [
+            visibleColumns.startDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.startDate)}</div>` : "",
+            visibleColumns.endDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.endDate)}</div>` : "",
+            visibleColumns.status ? `<div class="wbs-column-extra">${escapeHtmlText(statusLabel)}</div>` : "",
+          ].join("");
+          return `<div class="wbs-row"><div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
+        })
+        .join("");
+      return headerHtml + rowsHtml;
+    }
+
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。
+    // 【処理】年月ラベル（連続する同年月をまとめて幅を合算）と、日付見出し（土日で背景色を変える）
+    //   のHTML文字列を組み立てる（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
+    //   年月40px＋日付42px相当として配分）。
+    // 【結果】gantt-timeline-headerのHTML文字列を返す。
+    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) {
+      const monthLabelsHtml = [];
+      let groupStartIndex = 0;
+      for (let index = 1; index <= timelineDays.length; index++) {
+        const isGroupBoundary =
+          index === timelineDays.length ||
+          timelineDays[index].year !== timelineDays[groupStartIndex].year ||
+          timelineDays[index].month !== timelineDays[groupStartIndex].month;
+        if (!isGroupBoundary) continue;
+        const groupDayCount = index - groupStartIndex;
+        const { year, month } = timelineDays[groupStartIndex];
+        monthLabelsHtml.push(
+          `<div class="gantt-month-label" style="left:${groupStartIndex * pixelsPerDay}px;width:${groupDayCount * pixelsPerDay}px">${year}年${month}月</div>`
+        );
+        groupStartIndex = index;
+      }
+
+      const dayHeadersHtml = timelineDays
+        .map((day, index) => {
+          const weekendClass = day.isSaturday ? " is-saturday" : day.isSunday ? " is-sunday" : "";
+          return `<div class="gantt-day-column-header${weekendClass}" style="left:${index * pixelsPerDay}px;width:${pixelsPerDay}px">${day.dayOfMonth}</div>`;
+        })
+        .join("");
+
+      const totalWidthPx = timelineDays.length * pixelsPerDay;
+      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${monthLabelsHtml.join("")}${dayHeadersHtml}</div>`;
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
+    //   buildGanttTimelineDays の戻り値。milestones は project.milestones。
+    // 【処理】行の背景（縞模様＋土日列の色付け）、バー（親行は太め・中央配置、葉行は細め・
+    //   行の65%位置、完了ステータスは半透明）、マイルストーンの縦線＋ひし形マーカーを
+    //   すべて絶対配置のdivとして組み立てる（UIデザイン仕様書3章の視覚仕様に準拠）。
+    // 【結果】gantt-bodyのHTML文字列を返す。
+    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString) {
+      const totalWidthPx = timelineDays.length * pixelsPerDay;
+      const totalHeightPx = scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX;
+
+      const rowBackgroundsHtml = scheduleTreeRows
+        .map((_, rowIndex) => {
+          const evenClass = rowIndex % 2 === 1 ? " is-even-row" : "";
+          return `<div class="gantt-row-background${evenClass}" style="top:${rowIndex * GANTT_ROW_HEIGHT_PX}px"></div>`;
+        })
+        .join("");
+
+      const weekendColumnsHtml = timelineDays
+        .map((day, index) => {
+          if (!day.isSaturday && !day.isSunday) return "";
+          const weekendClass = day.isSaturday ? "is-saturday" : "is-sunday";
+          return `<div class="gantt-day-column-bg ${weekendClass}" style="left:${index * pixelsPerDay}px;width:${pixelsPerDay}px"></div>`;
+        })
+        .join("");
+
+      const barsHtml = scheduleTreeRows
+        .map(({ schedule, hasChildren }, rowIndex) => {
+          const geometry = calculateBarGeometry(schedule, timelineStartDateString, pixelsPerDay);
+          if (!geometry) return "";
+          const rowTopPx = rowIndex * GANTT_ROW_HEIGHT_PX;
+          const barHeightPx = hasChildren ? 22 : 16;
+          const barTopPx = hasChildren
+            ? rowTopPx + (GANTT_ROW_HEIGHT_PX - barHeightPx) / 2
+            : rowTopPx + GANTT_ROW_HEIGHT_PX * 0.65 - barHeightPx / 2;
+          const doneClass = schedule.taskStatus === "done" ? " is-done-status" : "";
+          const parentClass = hasChildren ? " is-parent-bar" : "";
+          const showLabel = hasChildren || geometry.widthPx > 60;
+          const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${geometry.durationDays}日)` : "";
+          const backgroundColor = schedule.color || "#2563EB";
+          return `<div class="gantt-bar${parentClass}${doneClass}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}</div>`;
+        })
+        .join("");
+
+      const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
+        .map(
+          (marker) =>
+            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px;height:${totalHeightPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
+        )
+        .join("");
+
+      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${rowBackgroundsHtml}${weekendColumnsHtml}${barsHtml}${milestoneMarkersHtml}</div>`;
+    }
+
+    // 【前提】scheduleTreeRows・timelineDays・milestonesは上記各関数の戻り値・入力と同じ。
+    // 【処理】タイムラインヘッダーとガント本体を連結する（ガントパネル全体の組み立て窓口）。
+    // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString) {
+      if (scheduleTreeRows.length === 0) {
+        return renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) + '<p class="empty-state-message">スケジュールがありません。</p>';
+      }
+      return (
+        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) +
+        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString)
+      );
+    }
+
+    // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の日本語見出し。
+    // 【処理】1列分のカンバンカードのHTML文字列を組み立てる。
+    // 【結果】renderKanbanBoardToHtml から列単位で呼び出されるHTML文字列を返す。
+    function renderKanbanColumnToHtml(taskListForColumn, columnLabel) {
+      const cardsHtml =
+        taskListForColumn.length === 0
+          ? '<p class="empty-state-message">タスクがありません。</p>'
+          : taskListForColumn.map((task) => `<div class="kanban-card">${escapeHtmlText(task.title)}</div>`).join("");
+      return `<div class="kanban-column"><h3>${escapeHtmlText(columnLabel)}</h3>${cardsHtml}</div>`;
+    }
+
+    // 【前提】taskGroupsByStatus は groupTasksByStatus の戻り値。
+    // 【処理】backlog/doing/doneの3列を横に並べたカンバンボード全体のHTML文字列を組み立てる。
+    // 【結果】カンバンパネルのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderKanbanBoardToHtml(taskGroupsByStatus) {
+      return `<div class="kanban-board">
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.backlog, "未着手")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.doing, "進行中")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.done, "完了")}
+      </div>`;
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件（x,y座標を持つ）。
+    // 【処理】issue.x/yをそのまま絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、
+    //   親子を結ぶ線（buildMindmapEdgeList・calculateEdgeGeometry）を組み立てる
+    //   （座標配置のドラッグ操作自体は今回のスコープ外。静的な配置表示のみ）。
+    // 【結果】マインドマップキャンバスのHTML文字列を返す。
+    function renderMindmapCanvasToHtml(issueList) {
+      if (issueList.length === 0) {
+        return '<p class="empty-state-message">マインドマップノードがありません。</p>';
+      }
+      const edgesHtml = buildMindmapEdgeList(issueList)
+        .map(({ fromIssue, toIssue }) => {
+          const geometry = calculateEdgeGeometry(fromIssue.x, fromIssue.y, toIssue.x, toIssue.y);
+          return `<div class="mindmap-edge" style="left:${geometry.leftPx}px;top:${geometry.topPx}px;width:${geometry.widthPx}px;transform:rotate(${geometry.angleDeg}deg)"></div>`;
+        })
+        .join("");
+      const nodesHtml = issueList
+        .map((issue) => {
+          const backgroundColor = issue.color || MINDMAP_NODE_COLORS[0];
+          return `<div class="mindmap-node" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${escapeHtmlText(issue.title)}</div>`;
+        })
+        .join("");
+      return `<div class="mindmap-canvas">${edgesHtml}${nodesHtml}</div>`;
+    }
+
+    // ===== UI：DOM反映（薄い関数） =====
+    // 【設計判断】以下は「HTML文字列を対応する要素のinnerHTMLへ入れるだけ」の薄い関数に留める。
+    //   ロジック（何を表示するか）は上の純粋関数側に寄せ、ここでは判断を持たせない。
+
+    function applyProjectSelectOptions(optionsHtml) {
+      document.getElementById("projectSelectDropdown").innerHTML = optionsHtml;
+    }
+
+    function applyWbsPanel(bodyHtml) {
+      document.getElementById("wbsPanel").innerHTML = bodyHtml;
+    }
+
+    function applyGanttPanel(bodyHtml) {
+      document.getElementById("ganttPanelBody").innerHTML = bodyHtml;
+    }
+
+    function applyKanbanPanel(bodyHtml) {
+      document.getElementById("kanbanPanelBody").innerHTML = bodyHtml;
+    }
+
+    function applyMindmapPanel(bodyHtml) {
+      document.getElementById("mindmapPanelBody").innerHTML = bodyHtml;
+    }
+
+    // 【前提】isLocked は現在のプロジェクトのロック状態。
+    // 【処理】ロック帯の表示・スケジュール追加ボタンの活性状態・ロックボタンの選択状態を
+    //   まとめて切り替える（基本設計書3.3節）。
+    // 【結果】画面上のロック関連の見た目が状態に一致する。
+    function applyLockState(isLocked) {
+      document.getElementById("lockBand").hidden = !isLocked;
+      document.getElementById("addScheduleButton").disabled = isLocked;
+      document.getElementById("lockToggleButton").classList.toggle("is-active", isLocked);
+    }
+
+    // ===== UI：統括（データ取得→純粋関数→DOM反映のつなぎ） =====
+
+    // 【前提】なし（常に全プロジェクトを取得する。projectsはインデックス無し＝常に全件表示の設計のため）。
+    // 【処理】getAllProjectsで最新の一覧を取得し、現在選択中のprojectIdを選択状態にして<select>へ反映する。
+    // 【結果】<select>の中身が最新のプロジェクト一覧に更新される。
+    async function refreshProjectSelectDropdown() {
+      const projectList = await getAllProjects();
+      applyProjectSelectOptions(renderProjectOptionsToHtml(projectList, currentSelectedProjectId));
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。currentProjectObjectが
+    //   switchToProjectで設定済みであること（プロジェクトのstartDate/endDate/milestonesを使うため）。
+    // 【処理】projectIdがnullなら空状態を表示し、そうでなければgetSchedulesByProjectで取得して
+    //   ツリー化し、WBSパネルとガント本体（タイムライン＋バー）の両方を再描画する。
+    // 【結果】WBS・ガント両パネルの表示が最新の状態に更新される。
+    async function refreshGanttPanel(projectId) {
+      if (!projectId || !currentProjectObject) {
+        applyWbsPanel("");
+        applyGanttPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const scheduleList = await getSchedulesByProject(projectId);
+      currentScheduleTreeRows = buildScheduleTreeRows(scheduleList);
+      currentTimelineStartDateString = currentProjectObject.startDate;
+      const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
+      applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
+      applyGanttPanel(
+        renderGanttChartToHtml(currentScheduleTreeRows, timelineDays, PIXELS_PER_DAY, currentProjectObject.milestones, currentProjectObject.startDate)
+      );
+    }
+
+    // refreshGanttPanelと同じ考え方。対象はtasks・カンバンボード。
+    async function refreshKanbanPanel(projectId) {
+      if (!projectId) {
+        applyKanbanPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const taskList = await getTasksByProject(projectId);
+      applyKanbanPanel(renderKanbanBoardToHtml(groupTasksByStatus(taskList)));
+    }
+
+    // refreshGanttPanelと同じ考え方。対象はissues・マインドマップキャンバス。
+    async function refreshMindmapPanel(projectId) {
+      if (!projectId) {
+        applyMindmapPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const issueList = await getIssuesByProject(projectId);
+      applyMindmapPanel(renderMindmapCanvasToHtml(issueList));
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】現在選択中のプロジェクトを切り替え、そのプロジェクトの最新データを取得してから、
+    //   3パネル（ガント・カンバン・マインドマップ）とロック状態表示をまとめて更新する。
+    // 【結果】currentSelectedProjectId・currentProjectObjectが更新され、画面全体が新しい
+    //   プロジェクトのものになる。
+    async function switchToProject(projectId) {
+      currentSelectedProjectId = projectId || null;
+      if (currentSelectedProjectId) {
+        const projectList = await getAllProjects();
+        currentProjectObject = projectList.find((project) => project.id === currentSelectedProjectId) || null;
+      } else {
+        currentProjectObject = null;
+      }
+      applyLockState(Boolean(currentProjectObject?.locked));
+      await Promise.all([
+        refreshGanttPanel(currentSelectedProjectId),
+        refreshKanbanPanel(currentSelectedProjectId),
+        refreshMindmapPanel(currentSelectedProjectId),
+      ]);
+    }
+
+    // 【前提】viewName は "gantt" | "kanban" | "mindmap" のいずれか。
+    // 【処理】該当するセクションだけを表示し、他は隠す。ヘッダー右側の「マインドマップ」
+    //   「タスク管理」ボタンの選択状態も合わせて切り替える（基本設計書2.1節：第2ヘッダー右側）。
+    //   データの再取得は行わない（表示・非表示の切り替えのみの責務）。
+    // 【結果】指定したビューだけが画面に表示される。
+    function switchMainView(viewName) {
+      currentMainView = viewName;
+      document.getElementById("ganttPanel").hidden = viewName !== "gantt";
+      document.getElementById("kanbanPanel").hidden = viewName !== "kanban";
+      document.getElementById("mindmapPanel").hidden = viewName !== "mindmap";
+      document.getElementById("switchToKanbanButton").classList.toggle("is-active", viewName === "kanban");
+      document.getElementById("switchToMindmapButton").classList.toggle("is-active", viewName === "mindmap");
+    }
+
+    // ===== UI：イベントハンドラ =====
+    // 【設計判断】prompt()による最小限の入力収集のみを行う（バリデーション・詳細フォームは
+    //   今回のスコープ外）。データが1件も無いと画面が常に空欄のままになるため、各ストアに
+    //   最低限の追加手段だけを用意する。削除UIは今回のスコープ外。
+
+    async function handleCreateProjectButtonClick() {
+      const projectName = window.prompt("プロジェクト名を入力してください");
+      if (!projectName) return;
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      const newProject = {
+        id: generateId(),
+        name: projectName,
+        startDate: todayDateString,
+        endDate: todayDateString,
+        milestones: [],
+        locked: false,
+        createdAt: new Date().toISOString(),
+      };
+      await addProject(newProject);
+      await refreshProjectSelectDropdown();
+      document.getElementById("projectSelectDropdown").value = newProject.id;
+      await switchToProject(newProject.id);
+    }
+
+    async function handleAddScheduleButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const scheduleName = window.prompt("スケジュール名を入力してください");
+      if (!scheduleName) return;
+      const scheduleStartDate = window.prompt("開始日を入力してください（YYYY-MM-DD）", currentProjectObject?.startDate || "");
+      const scheduleEndDate = window.prompt("終了日を入力してください（YYYY-MM-DD）", scheduleStartDate || "");
+      await addSchedule({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        parentId: null,
+        name: scheduleName,
+        startDate: scheduleStartDate || "",
+        endDate: scheduleEndDate || "",
+        assignee: "",
+        taskStatus: "todo",
+        notes: "",
+        color: "#2563EB",
+        order: currentScheduleTreeRows.length,
+      });
+      await refreshGanttPanel(currentSelectedProjectId);
+    }
+
+    async function handleAddTaskButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const taskTitle = window.prompt("タスクのタイトルを入力してください");
+      if (!taskTitle) return;
+      await addTask({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: taskTitle,
+        status: "backlog",
+        done: false,
+        doneAt: null,
+        priority: 4,
+        dueDate: "",
+        description: "",
+        order: 0,
+      });
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
+    async function handleAddIssueButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const issueTitle = window.prompt("ノードのタイトルを入力してください");
+      if (!issueTitle) return;
+      // 新規ノードが重ならないよう、ある程度ばらけた座標に配置する（ドラッグでの手動配置は今回スコープ外）。
+      const randomX = Math.round(80 + Math.random() * 320);
+      const randomY = Math.round(60 + Math.random() * 300);
+      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
+      await addIssue({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: issueTitle,
+        parentNodeId: null,
+        x: randomX,
+        y: randomY,
+        color: MINDMAP_NODE_COLORS[colorIndex],
+        order: 0,
+      });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
+    // 【処理】現在のプロジェクトのlockedを反転させて保存し、画面のロック表示を更新する
+    //   （基本設計書3.3節：ロックONで薄赤帯表示・スケジュール追加ボタン無効化）。
+    // 【結果】ロック状態がDBに保存され、画面にも反映される。
+    async function handleLockToggleButtonClick() {
+      if (!currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const updatedProject = { ...currentProjectObject, locked: !currentProjectObject.locked };
+      await addProject(updatedProject);
+      currentProjectObject = updatedProject;
+      applyLockState(updatedProject.locked);
+    }
+
+    // 【前提】currentTimelineStartDateStringが設定済み（ガントパネルが1度は描画済み）であること。
+    // 【処理】今日の日付がタイムライン先頭から何日目かを計算し、その位置が見えるよう
+    //   ガントのスクロール領域を横スクロールする（基本設計書2.2節「今日」ボタンの仕様）。
+    // 【結果】ガントチャートが今日の日付付近までスクロールされる。
+    function handleTodayButtonClick() {
+      if (!currentTimelineStartDateString) return;
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      const dayOffset = calculateDayOffsetFromTimelineStart(todayDateString, currentTimelineStartDateString);
+      document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * PIXELS_PER_DAY - 100, 0);
+    }
+
+    // 【前提】columnKey は "startDate" | "endDate" | "status"。buttonElement はクリックされたボタン。
+    // 【処理】該当列の表示/非表示を反転させ、ボタンの選択状態を更新した上で、
+    //   キャッシュ済みのcurrentScheduleTreeRowsを使ってWBSパネルだけを再描画する
+    //   （DBへの再問い合わせは不要。表示/非表示の切り替えだけなのでガント本体は再描画しない）。
+    // 【結果】WBSパネルに列が追加/削除された状態が反映される。
+    function handleToggleColumnClick(columnKey, buttonElement) {
+      visibleWbsColumns[columnKey] = !visibleWbsColumns[columnKey];
+      buttonElement.classList.toggle("is-active", visibleWbsColumns[columnKey]);
+      applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
+    }
+
+    // 【前提】なし。
+    // 【処理】現在のビューが対象ビューなら「ガント」へ戻し、そうでなければ対象ビューへ切り替える
+    //   （ヘッダーの「マインドマップ」「タスク管理」ボタンは、仕様書に明記の無いトグル的な
+    //   挙動として、もう一度押すとガントに戻る形にした＝今回の判断ポイント）。
+    // 【結果】メインビューが切り替わる。
+    function handleSwitchToKanbanButtonClick() {
+      switchMainView(currentMainView === "kanban" ? "gantt" : "kanban");
+    }
+    function handleSwitchToMindmapButtonClick() {
+      switchMainView(currentMainView === "mindmap" ? "gantt" : "mindmap");
+    }
+
+    // 【前提】event.currentTargetがdata-out-of-scope-label属性を持つボタンであること。
+    // 【処理】今回のスコープ外機能（サイドパネル・モーダル・インポート/エクスポート等）を
+    //   クリックした際、「未実装ではなく意図的なスコープ外」であることを利用者に伝える。
+    // 【結果】アラートで機能名とスコープ外である旨を表示する（データは変更しない）。
+    function handleOutOfScopeButtonClick(event) {
+      const featureLabel = event.currentTarget.dataset.outOfScopeLabel;
+      window.alert(`「${featureLabel}」は今回のスコープ外です（別工程で実装予定）。`);
+    }
+
+    // 【前提】DOMの構築が完了していること（DOMContentLoaded後に呼ばれる想定）。
+    // 【処理】各ボタン・<select>にイベントを登録し、プロジェクト一覧を取得して
+    //   先頭のプロジェクトを初期選択状態にする。
+    // 【結果】画面を開いた直後から、先頭プロジェクトのデータが3パネルに表示された状態になる
+    //   （プロジェクトが1件も無い場合は空状態表示のまま）。
+    async function initializeApp() {
+      document.getElementById("projectSelectDropdown").addEventListener("change", (event) => {
+        switchToProject(event.target.value || null);
+      });
+      document.getElementById("createProjectButton").addEventListener("click", handleCreateProjectButtonClick);
+      document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
+      document.getElementById("addTaskButton").addEventListener("click", handleAddTaskButtonClick);
+      document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
+      document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
+      document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      document.getElementById("toggleColumnStartDateButton").addEventListener("click", (event) => handleToggleColumnClick("startDate", event.currentTarget));
+      document.getElementById("toggleColumnEndDateButton").addEventListener("click", (event) => handleToggleColumnClick("endDate", event.currentTarget));
+      document.getElementById("toggleColumnStatusButton").addEventListener("click", (event) => handleToggleColumnClick("status", event.currentTarget));
+      document.getElementById("switchToKanbanButton").addEventListener("click", handleSwitchToKanbanButtonClick);
+      document.getElementById("switchToMindmapButton").addEventListener("click", handleSwitchToMindmapButtonClick);
+      for (const outOfScopeButton of document.querySelectorAll("[data-out-of-scope-label]")) {
+        outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
+      }
+
+      const projectList = await getAllProjects();
+      await refreshProjectSelectDropdown();
+      const firstProjectId = projectList.length > 0 ? projectList[0].id : null;
+      document.getElementById("projectSelectDropdown").value = firstProjectId || "";
+      await switchToProject(firstProjectId);
+    }
+
+    // Node.js等、windowが存在しない環境（自動テスト）でこのスクリプトを評価しても
+    // 起動処理が実行されないようにするガード（この関数群を純粋関数として単体テストするため）。
+    if (typeof window !== "undefined") {
+      window.addEventListener("DOMContentLoaded", initializeApp);
     }
   </script>
 </body>
