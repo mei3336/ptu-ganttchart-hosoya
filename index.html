@@ -489,8 +489,16 @@
       padding: 8px;
     }
 
+    .kanban-column-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
     .kanban-column h3 {
-      margin: 0 0 8px 0;
+      margin: 0;
       font-size: 13px;
       color: var(--color-text-mid);
     }
@@ -502,6 +510,17 @@
       box-shadow: var(--shadow-small);
       padding: 8px;
       margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: grab;
+    }
+
+    .kanban-card-main {
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
     }
 
     /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
@@ -1938,6 +1957,8 @@
     const collapsedMindmapIssueIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
+    // ドラッグ操作中のタスクid（カンバンのカード）。draggedScheduleIdと同じ理由・同じ寿命。
+    let draggedTaskId = null;
 
     // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
     const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
@@ -2560,22 +2581,33 @@
 
     // タスクのpriority（1:高〜4:なし）の日本語表示名（データモデル設計3.3節）。
     const TASK_PRIORITY_LABELS = { 1: "高", 2: "中", 3: "低", 4: "なし" };
+    // タスクのstatus（backlog/doing/done）の日本語表示名。カンバン列見出しと編集モーダルの
+    // ステータス選択で共有する。
+    const TASK_STATUS_LABELS = { backlog: "未着手", doing: "進行中", done: "完了" };
 
     // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の
     //   日本語見出し。columnStatusValue はそのstatus文字列（追加フォームの送信先に使う）。
-    // 【処理】1列分のカンバンカードと、モーダル・ダイアログ一覧P1「各列に追加フォームが
-    //   直接埋め込み」の仕様どおり、タスク名・優先度・期日の埋め込み追加フォームを
-    //   組み立てる（モーダルを介さない）。
+    // 【処理】1列分のカンバンカード（各カードに削除ボタンを添える。詳細設計書3.3.2：
+    //   deleteTodo）と、モーダル・ダイアログ一覧P1「各列に追加フォームが直接埋め込み」の
+    //   仕様どおり、タスク名・優先度・期日の埋め込み追加フォームを組み立てる
+    //   （モーダルを介さない）。完了列("done")のみ、完了済み一括削除ボタンを見出し横に
+    //   添える（詳細設計書3.3.2：clearDoneTodos）。
     // 【結果】renderKanbanBoardToHtml から列単位で呼び出されるHTML文字列を返す。
     function renderKanbanColumnToHtml(taskListForColumn, columnLabel, columnStatusValue) {
       const cardsHtml =
         taskListForColumn.length === 0
           ? '<p class="empty-state-message">タスクがありません。</p>'
           : taskListForColumn
-              .map(
-                (task) =>
-                  `<div class="kanban-card">${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>`
-              )
+              .map((task) => {
+                const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
+                return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}" draggable="true">
+                    <div class="kanban-card-main" data-action="edit-task">
+                      <div>${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
+                      ${dueDateHtml}
+                    </div>
+                    <button type="button" class="wbs-icon-button" data-action="delete-task" title="削除">🗑</button>
+                  </div>`;
+              })
               .join("");
 
       const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
@@ -2589,7 +2621,15 @@
           <button type="button" class="panel-add-button kanban-add-submit-button">＋ 追加</button>
         </div>
       `;
-      return `<div class="kanban-column"><h3>${escapeHtmlText(columnLabel)}</h3>${cardsHtml}${addFormHtml}</div>`;
+      const clearDoneButtonHtml =
+        columnStatusValue === "done" ? '<button type="button" class="toolbar-button" id="clearDoneTasksButton">完了済みを一括削除</button>' : "";
+      return `<div class="kanban-column" data-column-status="${columnStatusValue}">
+        <div class="kanban-column-header">
+          <h3>${escapeHtmlText(columnLabel)}</h3>
+          ${clearDoneButtonHtml}
+        </div>
+        ${cardsHtml}${addFormHtml}
+      </div>`;
     }
 
     // 【前提】taskGroupsByStatus は groupTasksByStatus の戻り値。
@@ -2735,6 +2775,64 @@
       }
       const taskList = await getTasksByProject(projectId);
       applyKanbanPanel(renderKanbanBoardToHtml(groupTasksByStatus(taskList)));
+    }
+
+    // 【前提】taskId は削除対象のタスクのid。
+    // 【処理】確認ダイアログ（詳細設計書3.3.2：deleteTodo「このタスクを削除しますか？」）の上で
+    //   deleteTaskし、削除ログを記録する（schedules/issuesの個別削除と同じ方針。tasksも
+    //   LOGGED_STORES対象のため）。
+    // 【結果】確認OK時、対象タスクが削除されカンバンパネルが再描画される。
+    async function handleDeleteTaskButtonClick(taskId) {
+      const taskList = await getTasksByProject(currentSelectedProjectId);
+      const task = taskList.find((candidateTask) => candidateTask.id === taskId);
+      if (!task) return;
+      if (!window.confirm("このタスクを削除しますか？")) return;
+      await deleteTask(taskId);
+      await addChangelogEntry({
+        id: generateId(),
+        projectId: task.projectId,
+        action: "delete",
+        store: "tasks",
+        storeLabel: "タスク",
+        itemId: task.id,
+        itemName: task.title,
+        changes: [],
+        snapshot: task,
+        createdAt: new Date().toISOString(),
+      });
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】currentSelectedProjectIdが設定済みであること。
+    // 【処理】完了列(status==="done")のタスクを数え、0件なら案内のみ表示して終了する。
+    //   1件以上あれば件数を明示した確認ダイアログの上で全件削除し、削除ログを個別に記録する
+    //   （詳細設計書3.3.2：clearDoneTodos）。
+    // 【結果】確認OK時、完了済みタスクがすべて削除されカンバンパネルが再描画される。
+    async function handleClearDoneTasksButtonClick() {
+      const taskList = await getTasksByProject(currentSelectedProjectId);
+      const doneTasks = taskList.filter((task) => task.status === "done");
+      if (doneTasks.length === 0) {
+        window.alert("完了タスクがありません");
+        return;
+      }
+      if (!window.confirm(`完了済み${doneTasks.length}件を削除しますか？`)) return;
+      for (const task of doneTasks) {
+        await deleteTask(task.id);
+        await addChangelogEntry({
+          id: generateId(),
+          projectId: task.projectId,
+          action: "delete",
+          store: "tasks",
+          storeLabel: "タスク",
+          itemId: task.id,
+          itemName: task.title,
+          changes: [],
+          snapshot: task,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      window.alert("完了済みタスクを削除しました");
+      await refreshKanbanPanel(currentSelectedProjectId);
     }
 
     // ===== P2：スナップショットパネル =====
@@ -3787,6 +3885,120 @@
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
+    // 【前提】task は編集対象の既存タスクオブジェクト。
+    // 【処理】タイトル・ステータス・優先度・期日・メモ（詳細）の入力欄を持つモーダルの
+    //   HTML文字列を組み立てる（詳細設計書3.3.2：saveTodoEdit相当。作成後は一切編集
+    //   できなかった従来の制約を解消する。新規作成は列埋め込みフォームで行うため、
+    //   このモーダルは編集専用で新規作成モードを持たない）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderTaskModalToHtml(task) {
+      const statusOptionsHtml = Object.entries(TASK_STATUS_LABELS)
+        .map(([value, label]) => `<option value="${value}"${value === task.status ? " selected" : ""}>${label}</option>`)
+        .join("");
+      const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
+        .map(([value, label]) => `<option value="${value}"${Number(value) === task.priority ? " selected" : ""}>${label}</option>`)
+        .join("");
+      return `
+        <h2>タスク編集</h2>
+        <div class="modal-field">
+          <label for="taskModalTitleInput">タスク名</label>
+          <input type="text" id="taskModalTitleInput" value="${escapeHtmlText(task.title)}">
+        </div>
+        <div class="modal-field">
+          <label for="taskModalStatusSelect">ステータス</label>
+          <select id="taskModalStatusSelect">${statusOptionsHtml}</select>
+        </div>
+        <div class="modal-field">
+          <label for="taskModalPrioritySelect">優先度</label>
+          <select id="taskModalPrioritySelect">${priorityOptionsHtml}</select>
+        </div>
+        <div class="modal-field">
+          <label for="taskModalDueDateInput">期日</label>
+          <input type="date" id="taskModalDueDateInput" value="${escapeHtmlText(task.dueDate || "")}">
+        </div>
+        <div class="modal-field">
+          <label for="taskModalDescriptionTextarea">メモ（詳細）</label>
+          <textarea id="taskModalDescriptionTextarea" rows="4">${escapeHtmlText(task.description || "")}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="taskModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="taskModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】task は編集対象の既存タスクオブジェクト。
+    // 【処理】タスク編集モーダルを開き、キャンセル・保存にイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openTaskEditModal(task) {
+      openModal(renderTaskModalToHtml(task));
+      document.getElementById("taskModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("taskModalSaveButton").addEventListener("click", () => handleTaskModalSaveButtonClick(task));
+    }
+
+    // 【前提】existingTask は編集開始時点のタスクオブジェクト。
+    // 【処理】モーダル内の入力値を読み取り、タイトルが空でなければaddTaskで上書き保存する。
+    //   ステータスを"done"に変更した場合はdoneAtを現在時刻にし、"done"以外に変更した場合は
+    //   done/doneAtをリセットする（列埋め込みフォームでの新規作成時と同じ不変条件を維持する。
+    //   すでに"done"だった場合はdoneAtの上書きをせず、最初に完了した時刻を保持する）。
+    // 【結果】保存成功時はモーダルを閉じ、カンバンパネルを更新する。
+    async function handleTaskModalSaveButtonClick(existingTask) {
+      const title = document.getElementById("taskModalTitleInput").value.trim();
+      if (!title) {
+        window.alert("タスク名を入力してください");
+        return;
+      }
+      const status = document.getElementById("taskModalStatusSelect").value;
+      const priority = Number(document.getElementById("taskModalPrioritySelect").value);
+      const dueDate = document.getElementById("taskModalDueDateInput").value;
+      const description = document.getElementById("taskModalDescriptionTextarea").value;
+      const taskToSave = {
+        ...existingTask,
+        title,
+        status,
+        priority,
+        dueDate,
+        description,
+        done: status === "done",
+        doneAt: status === "done" ? (existingTask.status === "done" ? existingTask.doneAt : new Date().toISOString()) : null,
+      };
+      await addTask(taskToSave);
+      closeModal();
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】taskId はクリックされたカードのタスクid。
+    // 【処理】最新のタスク一覧から対象を探し、編集モーダルを開く。
+    // 【結果】編集モーダルが表示される。
+    async function handleOpenTaskEditModalClick(taskId) {
+      const taskList = await getTasksByProject(currentSelectedProjectId);
+      const task = taskList.find((candidateTask) => candidateTask.id === taskId);
+      if (!task) return;
+      openTaskEditModal(task);
+    }
+
+    // 【前提】taskId は移動対象のタスクid。targetColumnStatus はドロップ先の列status
+    //   （"backlog"|"doing"|"done"）。
+    // 【処理】対象タスクのstatusをtargetColumnStatusに更新する（詳細設計書3.3.3：
+    //   dropTodoCard。基本設計書1.3節に明記されている既知の非整合どおり、タスクのstatusは
+    //   スケジュールのtaskStatusとは独立した別概念のため、他ストアとの連動は行わない）。
+    //   ステータスを"done"に変更した場合のみdoneAtを現在時刻にする（編集モーダル保存時と
+    //   同じ不変条件を維持する）。
+    // 【結果】ステータスが実際に変わっていれば保存してカンバンパネルを再描画する。同じ列への
+    //   ドロップ等、変わっていなければ何もしない。
+    async function handleTaskDragDrop(taskId, targetColumnStatus) {
+      const taskList = await getTasksByProject(currentSelectedProjectId);
+      const task = taskList.find((candidateTask) => candidateTask.id === taskId);
+      if (!task || task.status === targetColumnStatus) return;
+      await addTask({
+        ...task,
+        status: targetColumnStatus,
+        done: targetColumnStatus === "done",
+        doneAt: targetColumnStatus === "done" ? new Date().toISOString() : null,
+      });
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
     async function handleAddIssueButtonClick() {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
@@ -4147,12 +4359,48 @@
         closeSlidePanel("kanbanSlidePanel");
         document.getElementById("switchToKanbanButton").classList.remove("is-active");
       });
-      // カンバンの埋め込み追加フォームはkanbanPanelBodyのinnerHTMLごと再生成されるため、
-      // 個々のボタンではなく親要素にイベント委譲する。
+      // カンバンの埋め込み追加フォーム・削除ボタン・完了済み一括削除ボタンは
+      // kanbanPanelBodyのinnerHTMLごと再生成されるため、個々のボタンではなく
+      // 親要素にイベント委譲する。
       document.getElementById("kanbanPanelBody").addEventListener("click", (event) => {
         const submitButton = event.target.closest(".kanban-add-submit-button");
-        if (!submitButton) return;
-        handleKanbanAddFormSubmit(submitButton.closest(".kanban-add-form"));
+        if (submitButton) {
+          handleKanbanAddFormSubmit(submitButton.closest(".kanban-add-form"));
+          return;
+        }
+        const deleteButton = event.target.closest('[data-action="delete-task"]');
+        if (deleteButton) {
+          const card = deleteButton.closest("[data-task-id]");
+          if (card) handleDeleteTaskButtonClick(card.dataset.taskId);
+          return;
+        }
+        const editArea = event.target.closest('[data-action="edit-task"]');
+        if (editArea) {
+          const card = editArea.closest("[data-task-id]");
+          if (card) handleOpenTaskEditModalClick(card.dataset.taskId);
+          return;
+        }
+        if (event.target.id === "clearDoneTasksButton") handleClearDoneTasksButtonClick();
+      });
+      // ドラッグ＆ドロップによる列間の移動（WBS行の並び替えと同じPointer/HTML5 Drag &
+      // Drop APIの使い分け方針：カンバンも離散的な移動先＝列単位のため、こちらもHTML5
+      // draggableを使う。ドロップ先はカード単体ではなく列全体＝data-column-statusを持つ
+      // .kanban-columnで判定する）。
+      document.getElementById("kanbanPanelBody").addEventListener("dragstart", (event) => {
+        const draggedCard = event.target.closest(".kanban-card[data-task-id]");
+        if (!draggedCard) return;
+        draggedTaskId = draggedCard.dataset.taskId;
+        event.dataTransfer.effectAllowed = "move";
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("dragover", (event) => {
+        if (event.target.closest(".kanban-column[data-column-status]")) event.preventDefault();
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("drop", (event) => {
+        const targetColumn = event.target.closest(".kanban-column[data-column-status]");
+        if (!targetColumn || !draggedTaskId) return;
+        event.preventDefault();
+        handleTaskDragDrop(draggedTaskId, targetColumn.dataset.columnStatus);
+        draggedTaskId = null;
       });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
