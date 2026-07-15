@@ -280,6 +280,47 @@
       const store = transaction.objectStore(STORE_SCHEDULES);
       return promisifyRequest(store.delete(scheduleId), transaction);
     }
+
+    // ===== tasks ストア（カンバン）のCRUD =====
+
+    // tasks の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
+    // （いずれも STORE_DEFINITIONS の tasks 定義と同じ値を指す）。
+    const STORE_TASKS = "tasks";
+    const INDEX_TASKS_BY_PROJECT = "by_projectId";
+
+    // 【前提】task は id を含む1件分のタスクオブジェクト（id は呼び出し側で採番済み）。
+    //   done（完了フラグ）と status（カンバン列）の同期は、ここでは検証・補正しない
+    //   （データモデル設計6章：整合性チェックは保存前のアプリケーション層＝フォーム送信処理の責務。
+    //   addProject / addSchedule と同様、この関数は「渡された内容をそのままputする」役割に徹する）。
+    // 【処理】読み書きトランザクションで tasks ストアに put する（upsert）。
+    // 【結果】コミット完了後に resolve する（＝保存が確定したことを保証）。
+    async function addTask(task) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_TASKS, "readwrite");
+      const store = transaction.objectStore(STORE_TASKS);
+      return promisifyRequest(store.put(task), transaction);
+    }
+
+    // 【前提】projectId は絞り込みたいプロジェクトの id。
+    // 【処理】by_projectId インデックスを使い、そのプロジェクトに属するタスクを全て取得する
+    //   （タスク管理パネル＝カンバンはプロジェクトごとに開くため）。
+    // 【結果】タスクの配列を resolve する（0件なら空配列）。カンバン列ごとの振り分けは呼び出し側の責務。
+    async function getTasksByProject(projectId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_TASKS, "readonly");
+      const index = transaction.objectStore(STORE_TASKS).index(INDEX_TASKS_BY_PROJECT);
+      return promisifyRequest(index.getAll(projectId), transaction);
+    }
+
+    // 【前提】taskId は削除したいタスクの id。
+    // 【処理】読み書きトランザクションで tasks ストアから該当1件を削除する。
+    // 【結果】コミット完了後に resolve する（対象が存在しなくても delete はエラーにならない＝冪等）。
+    async function deleteTask(taskId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_TASKS, "readwrite");
+      const store = transaction.objectStore(STORE_TASKS);
+      return promisifyRequest(store.delete(taskId), transaction);
+    }
   </script>
 </body>
 </html>
