@@ -367,6 +367,71 @@
       const store = transaction.objectStore(STORE_COMMENTS);
       return promisifyRequest(store.delete(commentId), transaction);
     }
+
+    // ===== changelog ストア（変更履歴）のCRUD =====
+
+    // changelog の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
+    // （いずれも STORE_DEFINITIONS の changelog 定義と同じ値を指す）。
+    const STORE_CHANGELOG = "changelog";
+    const INDEX_CHANGELOG_BY_PROJECT = "by_projectId";
+
+    // 【前提】entry は id を含む1件分の変更履歴オブジェクト（id は呼び出し側で採番済み）。
+    //   action/store/changes/snapshot 等の組み立て（何がどう変わったかの判定）はここでは行わない
+    //   （データモデル設計6章と同じ考え方：ログ内容の組み立ては、各CRUD操作を呼ぶ上位処理の責務。
+    //   この関数は組み立て済みの entry をそのまま保存するだけの部品）。
+    // 【処理】読み書きトランザクションで changelog ストアに put する（upsert）。
+    // 【結果】コミット完了後に resolve する（＝保存が確定したことを保証）。
+    async function addChangelogEntry(entry) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_CHANGELOG, "readwrite");
+      const store = transaction.objectStore(STORE_CHANGELOG);
+      return promisifyRequest(store.put(entry), transaction);
+    }
+
+    // 【前提】projectId は絞り込みたいプロジェクトの id（未選択時の操作は "global" という文字列）。
+    // 【処理】by_projectId インデックスを使い、そのプロジェクトの変更履歴を全て取得する
+    //   （変更履歴パネルはプロジェクトごとに表示するため）。"global" も他のprojectIdと同じ扱いで、
+    //   特別扱いの関数は用意しない。
+    // 【結果】変更履歴の配列を resolve する（0件なら空配列）。
+    async function getChangelogByProject(projectId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_CHANGELOG, "readonly");
+      const index = transaction.objectStore(STORE_CHANGELOG).index(INDEX_CHANGELOG_BY_PROJECT);
+      return promisifyRequest(index.getAll(projectId), transaction);
+    }
+
+    // 【前提】projectId は削除対象を絞り込むプロジェクトの id。
+    //   このアプリには変更履歴の「個別削除」機能はなく、「履歴の全削除」ボタンのみが存在する
+    //   （詳細設計書3.6.3節`clearChangelog`）。そのためこの関数は1件削除ではなく、
+    //   指定プロジェクトの変更履歴を丸ごと削除する仕様にする。
+    // 【なぜ promisifyRequest を使わないのか】このヘルパーは「1トランザクションにつき
+    //   transaction.oncomplete を1回だけ設定する」前提で作られている。複数件のdeleteをそのつど
+    //   promisifyRequest に渡すと、同じトランザクションの oncomplete ハンドラを毎回上書きしてしまい、
+    //   最後の1件以外は永久に resolve されなくなる。そのため、この関数だけは
+    //   「1トランザクション・複数delete・oncompleteは1回だけ」を自分で組み立てる。
+    // 【処理】1つの読み書きトランザクションの中で、対象プロジェクトの全キーを取得し、
+    //   それぞれに delete を発行してから、トランザクション全体の完了を待つ。
+    // 【結果】コミット完了後に resolve する（対象が0件でも正常に完了する）。
+    function clearChangelogByProject(projectId) {
+      return getDB().then((db) => {
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_CHANGELOG, "readwrite");
+          const store = transaction.objectStore(STORE_CHANGELOG);
+          const index = store.index(INDEX_CHANGELOG_BY_PROJECT);
+          const getKeysRequest = index.getAllKeys(projectId);
+
+          getKeysRequest.onsuccess = () => {
+            for (const key of getKeysRequest.result) {
+              store.delete(key);
+            }
+          };
+          getKeysRequest.onerror = () => reject(getKeysRequest.error);
+
+          transaction.oncomplete = () => resolve();
+          transaction.onabort = () => reject(transaction.error);
+        });
+      });
+    }
   </script>
 </body>
 </html>
