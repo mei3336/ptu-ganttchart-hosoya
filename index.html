@@ -1950,6 +1950,9 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
+    // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
+    // DB非保存の画面上だけの一時状態にする。
+    const collapsedMindmapIssueIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
 
@@ -2166,6 +2169,53 @@
           leftPx: calculateDayOffsetFromTimelineStart(milestone.date, timelineStartDateString) * pixelsPerDay,
           name: milestone.name,
         }));
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件。rootIssueId は起点ノードのid。
+    // 【処理】parentNodeIdをたどり、rootIssueId自身を含む子孫issueのidを幅優先で収集する
+    //   （issuesにはparentNodeIdのインデックスが無いため、getIssuesByProjectで読み切った
+    //   全件をアプリ層で辿る。deleteIssueCascade・折りたたみ機能の両方で使う共通ロジック）。
+    // 【結果】[rootIssueId, ...子孫id...] の配列を返す。
+    function collectIssueSubtreeIds(issueList, rootIssueId) {
+      const childIssuesByParentNodeId = new Map();
+      for (const issue of issueList) {
+        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
+        if (!childIssuesByParentNodeId.has(issue.parentNodeId)) {
+          childIssuesByParentNodeId.set(issue.parentNodeId, []);
+        }
+        childIssuesByParentNodeId.get(issue.parentNodeId).push(issue);
+      }
+
+      const collectedIds = [];
+      let frontier = [rootIssueId];
+      while (frontier.length > 0) {
+        const nextFrontier = [];
+        for (const id of frontier) {
+          collectedIds.push(id);
+          const childIssues = childIssuesByParentNodeId.get(id) || [];
+          nextFrontier.push(...childIssues.map((childIssue) => childIssue.id));
+        }
+        frontier = nextFrontier;
+      }
+      return collectedIds;
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件。collapsedIssueIds は
+    //   折りたたまれているissueidの集合（Set）。
+    // 【処理】折りたたまれた各ノードについて、collectIssueSubtreeIdsで子孫id（自身は除く）を
+    //   集めて非表示集合にまとめ、issueListからそれらを除外する。
+    // 【結果】実際に画面へ表示すべきissueだけの配列を返す。
+    function filterVisibleIssues(issueList, collapsedIssueIds) {
+      if (collapsedIssueIds.size === 0) return issueList;
+      const hiddenIssueIds = new Set();
+      for (const collapsedIssueId of collapsedIssueIds) {
+        for (const descendantId of collectIssueSubtreeIds(issueList, collapsedIssueId)) {
+          if (descendantId !== collapsedIssueId) {
+            hiddenIssueIds.add(descendantId);
+          }
+        }
+      }
+      return issueList.filter((issue) => !hiddenIssueIds.has(issue.id));
     }
 
     // 【前提】issueList は同一プロジェクト内のissue全件（親子関係はparentNodeIdで表現）。
@@ -2570,26 +2620,35 @@
       </div>`;
     }
 
-    // 【前提】issueList は同一プロジェクト内のissue全件（x,y座標を持つ）。
-    // 【処理】issue.x/yをそのまま絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、
-    //   親子を結ぶ線（buildMindmapEdgeList・calculateEdgeGeometry）を組み立てる。
+    // 【前提】issueList は同一プロジェクト内のissue全件（折りたたみ状態に関係なく常に全件、
+    //   x,y座標を持つ）。collapsedIssueIds は折りたたまれているissueidの集合。
+    // 【処理】filterVisibleIssuesで実際に表示する行を絞り込んでから、issue.x/yをそのまま
+    //   絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、親子を結ぶ線
+    //   （buildMindmapEdgeList・calculateEdgeGeometry。辺も絞り込み後のissueListから
+    //   計算するため、隠れた子ノードへの辺は自動的に描画されない）を組み立てる。
     //   各ノードにdata-issue-idを持たせ、ドラッグ配置・右クリックメニューの対象特定に使う。
-    //   子を持つノードにはis-collapsed-nodeクラス判定用のdata-has-childrenも持たせる。
+    //   子を持つノードには「▸ 」を名前の前に付け、折りたたみ中はis-collapsed-nodeクラスで
+    //   見た目の目印を付ける。
     // 【結果】マインドマップキャンバスのHTML文字列を返す。
-    function renderMindmapCanvasToHtml(issueList) {
-      if (issueList.length === 0) {
+    function renderMindmapCanvasToHtml(issueList, collapsedIssueIds) {
+      const visibleIssues = filterVisibleIssues(issueList, collapsedIssueIds);
+      if (visibleIssues.length === 0) {
         return '<p class="empty-state-message">マインドマップノードがありません。</p>';
       }
-      const edgesHtml = buildMindmapEdgeList(issueList)
+      const edgesHtml = buildMindmapEdgeList(visibleIssues)
         .map(({ fromIssue, toIssue }) => {
           const geometry = calculateEdgeGeometry(fromIssue.x, fromIssue.y, toIssue.x, toIssue.y);
           return `<div class="mindmap-edge" style="left:${geometry.leftPx}px;top:${geometry.topPx}px;width:${geometry.widthPx}px;transform:rotate(${geometry.angleDeg}deg)"></div>`;
         })
         .join("");
-      const nodesHtml = issueList
+      const nodesHtml = visibleIssues
         .map((issue) => {
           const backgroundColor = issue.color || MINDMAP_NODE_COLORS[0];
-          return `<div class="mindmap-node" data-issue-id="${escapeHtmlText(issue.id)}" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${escapeHtmlText(issue.title)}</div>`;
+          const hasChildren = issueList.some((candidateChild) => candidateChild.parentNodeId === issue.id);
+          const isCollapsed = collapsedIssueIds.has(issue.id);
+          const collapsedClass = isCollapsed ? " is-collapsed-node" : "";
+          const collapsedIndicator = hasChildren && isCollapsed ? "▸ " : "";
+          return `<div class="mindmap-node${collapsedClass}" data-issue-id="${escapeHtmlText(issue.id)}" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${collapsedIndicator}${escapeHtmlText(issue.title)}</div>`;
         })
         .join("");
       return `<div class="mindmap-canvas">${edgesHtml}${nodesHtml}</div>`;
@@ -3138,7 +3197,7 @@
         return;
       }
       const issueList = await getIssuesByProject(projectId);
-      applyMindmapPanel(renderMindmapCanvasToHtml(issueList));
+      applyMindmapPanel(renderMindmapCanvasToHtml(issueList, collapsedMindmapIssueIds));
     }
 
     // 【前提】projectId はnull、または実在するプロジェクトのid。
@@ -3948,8 +4007,23 @@
         await handleAddChildIssueButtonClick(issueId);
       } else if (action === "add-sibling") {
         await handleAddSiblingIssueButtonClick(issueId);
+      } else if (action === "toggle-collapse") {
+        handleToggleIssueCollapseButtonClick(issueId);
       }
-      // "toggle-collapse"・"delete"はそれぞれ後続の折りたたみ機能・連鎖削除の実装で対応する。
+      // "delete"は連鎖削除のUI接続で対応する。
+    }
+
+    // 【前提】issueId は開閉を切り替えたいノードのid。
+    // 【処理】collapsedMindmapIssueIdsへの追加/削除だけを行い、パネルを再描画する
+    //   （折りたたみ状態はDB非保存の画面上だけの一時状態。collapsedScheduleIdsと同じ設計）。
+    // 【結果】対象ノードの子孫が表示/非表示になる。
+    function handleToggleIssueCollapseButtonClick(issueId) {
+      if (collapsedMindmapIssueIds.has(issueId)) {
+        collapsedMindmapIssueIds.delete(issueId);
+      } else {
+        collapsedMindmapIssueIds.add(issueId);
+      }
+      refreshMindmapPanel(currentSelectedProjectId);
     }
 
     // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
