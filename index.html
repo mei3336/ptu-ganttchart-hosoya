@@ -2572,8 +2572,9 @@
 
     // 【前提】issueList は同一プロジェクト内のissue全件（x,y座標を持つ）。
     // 【処理】issue.x/yをそのまま絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、
-    //   親子を結ぶ線（buildMindmapEdgeList・calculateEdgeGeometry）を組み立てる
-    //   （座標配置のドラッグ操作自体は今回のスコープ外。静的な配置表示のみ）。
+    //   親子を結ぶ線（buildMindmapEdgeList・calculateEdgeGeometry）を組み立てる。
+    //   各ノードにdata-issue-idを持たせ、ドラッグ配置・右クリックメニューの対象特定に使う。
+    //   子を持つノードにはis-collapsed-nodeクラス判定用のdata-has-childrenも持たせる。
     // 【結果】マインドマップキャンバスのHTML文字列を返す。
     function renderMindmapCanvasToHtml(issueList) {
       if (issueList.length === 0) {
@@ -2588,7 +2589,7 @@
       const nodesHtml = issueList
         .map((issue) => {
           const backgroundColor = issue.color || MINDMAP_NODE_COLORS[0];
-          return `<div class="mindmap-node" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${escapeHtmlText(issue.title)}</div>`;
+          return `<div class="mindmap-node" data-issue-id="${escapeHtmlText(issue.id)}" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${escapeHtmlText(issue.title)}</div>`;
         })
         .join("");
       return `<div class="mindmap-canvas">${edgesHtml}${nodesHtml}</div>`;
@@ -3751,7 +3752,8 @@
       }
       const issueTitle = window.prompt("ノードのタイトルを入力してください");
       if (!issueTitle) return;
-      // 新規ノードが重ならないよう、ある程度ばらけた座標に配置する（ドラッグでの手動配置は今回スコープ外）。
+      // 新規ノードが重ならないよう、ある程度ばらけた座標に配置する
+      // （初期配置のみランダム。配置後はドラッグで自由に動かせる＝下記の一連のハンドラ）。
       const randomX = Math.round(80 + Math.random() * 320);
       const randomY = Math.round(60 + Math.random() * 300);
       const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
@@ -3765,6 +3767,79 @@
         color: MINDMAP_NODE_COLORS[colorIndex],
         order: 0,
       });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // ===== マインドマップ：ノードのドラッグ配置 =====
+    // 【設計判断】ノードの自由な2次元配置の変更は、HTML5のdraggable属性（discreteな
+    //   ドロップ先を前提とするAPIで、WBS行の並び替えのような「入れ替え」向き）ではなく、
+    //   pointerdown/pointermove/pointerupで座標を直接計算する方式にする。
+    //   ドラッグ中は見た目（left/top）だけを更新し、DBへの保存はpointerup時の1回だけ行う
+    //   （ドラッグ中に毎回addIssueするのは書き込み回数・再描画の面で無駄なため）。
+
+    // ドラッグ中のノードのissueId。ドラッグしていない時はnull。
+    let draggedMindmapIssueId = null;
+    let mindmapDragStartPointerX = 0;
+    let mindmapDragStartPointerY = 0;
+    let mindmapDragStartNodeX = 0;
+    let mindmapDragStartNodeY = 0;
+    // これ未満の移動量は「クリック」とみなし、座標の保存を行わない（誤操作での無駄な書き込み防止）。
+    const MINDMAP_DRAG_THRESHOLD_PX = 3;
+
+    // 【前提】event はmindmap-node要素上でのpointerdownイベント。issueId はそのノードのid。
+    //   nodeElement はイベントが発生した実際のDOM要素。
+    // 【処理】ドラッグ開始時点のポインタ座標・ノード座標を記録する（以降のpointermoveで
+    //   差分計算するための基準点）。
+    // 【結果】ドラッグ状態が開始される（実際の座標更新はpointermoveハンドラが行う）。
+    function handleMindmapNodePointerDown(event, issueId, nodeElement) {
+      draggedMindmapIssueId = issueId;
+      mindmapDragStartPointerX = event.clientX;
+      mindmapDragStartPointerY = event.clientY;
+      mindmapDragStartNodeX = parseFloat(nodeElement.style.left) || 0;
+      mindmapDragStartNodeY = parseFloat(nodeElement.style.top) || 0;
+      nodeElement.classList.add("is-dragging");
+      nodeElement.setPointerCapture(event.pointerId);
+    }
+
+    // 【前提】draggedMindmapIssueIdが設定済み（ドラッグ中）であること。
+    // 【処理】ポインタの移動量ぶん、ドラッグ中ノードのleft/topスタイルを直接書き換える。
+    //   DBへの保存はしない（見た目だけをポインタに追従させる）。
+    // 【結果】ノードが視覚的にポインタへ追従する。
+    function handleMindmapNodePointerMove(event) {
+      if (!draggedMindmapIssueId) return;
+      const nodeElement = document.querySelector(`.mindmap-node[data-issue-id="${draggedMindmapIssueId}"]`);
+      if (!nodeElement) return;
+      const deltaX = event.clientX - mindmapDragStartPointerX;
+      const deltaY = event.clientY - mindmapDragStartPointerY;
+      nodeElement.style.left = `${mindmapDragStartNodeX + deltaX}px`;
+      nodeElement.style.top = `${mindmapDragStartNodeY + deltaY}px`;
+    }
+
+    // 【前提】ドラッグ中であること。
+    // 【処理】移動量がMINDMAP_DRAG_THRESHOLD_PX未満なら「クリック」とみなし何もしない。
+    //   それ以上動いていれば、最終的なleft/topをissueのx/yとしてaddIssueで保存する
+    //   （辺の再描画はrefreshMindmapPanelに任せる）。
+    // 【結果】ノードの新しい座標がDBに保存され、パネルが再描画される。
+    async function handleMindmapNodePointerUp(event) {
+      if (!draggedMindmapIssueId) return;
+      const issueId = draggedMindmapIssueId;
+      draggedMindmapIssueId = null;
+      const nodeElement = document.querySelector(`.mindmap-node[data-issue-id="${issueId}"]`);
+      if (!nodeElement) return;
+      nodeElement.classList.remove("is-dragging");
+
+      const deltaX = event.clientX - mindmapDragStartPointerX;
+      const deltaY = event.clientY - mindmapDragStartPointerY;
+      if (Math.abs(deltaX) < MINDMAP_DRAG_THRESHOLD_PX && Math.abs(deltaY) < MINDMAP_DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      const newX = Math.round(mindmapDragStartNodeX + deltaX);
+      const newY = Math.round(mindmapDragStartNodeY + deltaY);
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const existingIssue = issueList.find((issue) => issue.id === issueId);
+      if (!existingIssue) return;
+      await addIssue({ ...existingIssue, x: newX, y: newY });
       await refreshMindmapPanel(currentSelectedProjectId);
     }
 
@@ -3853,6 +3928,15 @@
       document.getElementById("deleteProjectButton").addEventListener("click", handleDeleteProjectButtonClick);
       document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
+      // マインドマップのノードドラッグ。pointerdownは各ノードへのイベント委譲、
+      // pointermove/pointerupはドラッグ中にポインタがノード外へ出ても追従できるようdocument側で拾う。
+      document.getElementById("mindmapPanelBody").addEventListener("pointerdown", (event) => {
+        const node = event.target.closest(".mindmap-node");
+        if (!node) return;
+        handleMindmapNodePointerDown(event, node.dataset.issueId, node);
+      });
+      document.addEventListener("pointermove", handleMindmapNodePointerMove);
+      document.addEventListener("pointerup", handleMindmapNodePointerUp);
       document.getElementById("closeKanbanPanelButton").addEventListener("click", () => {
         closeSlidePanel("kanbanSlidePanel");
         document.getElementById("switchToKanbanButton").classList.remove("is-active");
