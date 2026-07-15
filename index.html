@@ -514,6 +514,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      cursor: grab;
     }
 
     .kanban-card-main {
@@ -1956,6 +1957,8 @@
     const collapsedMindmapIssueIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
+    // ドラッグ操作中のタスクid（カンバンのカード）。draggedScheduleIdと同じ理由・同じ寿命。
+    let draggedTaskId = null;
 
     // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
     const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
@@ -2597,7 +2600,7 @@
           : taskListForColumn
               .map((task) => {
                 const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
-                return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}">
+                return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}" draggable="true">
                     <div class="kanban-card-main" data-action="edit-task">
                       <div>${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
                       ${dueDateHtml}
@@ -2620,7 +2623,7 @@
       `;
       const clearDoneButtonHtml =
         columnStatusValue === "done" ? '<button type="button" class="toolbar-button" id="clearDoneTasksButton">完了済みを一括削除</button>' : "";
-      return `<div class="kanban-column">
+      return `<div class="kanban-column" data-column-status="${columnStatusValue}">
         <div class="kanban-column-header">
           <h3>${escapeHtmlText(columnLabel)}</h3>
           ${clearDoneButtonHtml}
@@ -3974,6 +3977,28 @@
       openTaskEditModal(task);
     }
 
+    // 【前提】taskId は移動対象のタスクid。targetColumnStatus はドロップ先の列status
+    //   （"backlog"|"doing"|"done"）。
+    // 【処理】対象タスクのstatusをtargetColumnStatusに更新する（詳細設計書3.3.3：
+    //   dropTodoCard。基本設計書1.3節に明記されている既知の非整合どおり、タスクのstatusは
+    //   スケジュールのtaskStatusとは独立した別概念のため、他ストアとの連動は行わない）。
+    //   ステータスを"done"に変更した場合のみdoneAtを現在時刻にする（編集モーダル保存時と
+    //   同じ不変条件を維持する）。
+    // 【結果】ステータスが実際に変わっていれば保存してカンバンパネルを再描画する。同じ列への
+    //   ドロップ等、変わっていなければ何もしない。
+    async function handleTaskDragDrop(taskId, targetColumnStatus) {
+      const taskList = await getTasksByProject(currentSelectedProjectId);
+      const task = taskList.find((candidateTask) => candidateTask.id === taskId);
+      if (!task || task.status === targetColumnStatus) return;
+      await addTask({
+        ...task,
+        status: targetColumnStatus,
+        done: targetColumnStatus === "done",
+        doneAt: targetColumnStatus === "done" ? new Date().toISOString() : null,
+      });
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
     async function handleAddIssueButtonClick() {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
@@ -4356,6 +4381,26 @@
           return;
         }
         if (event.target.id === "clearDoneTasksButton") handleClearDoneTasksButtonClick();
+      });
+      // ドラッグ＆ドロップによる列間の移動（WBS行の並び替えと同じPointer/HTML5 Drag &
+      // Drop APIの使い分け方針：カンバンも離散的な移動先＝列単位のため、こちらもHTML5
+      // draggableを使う。ドロップ先はカード単体ではなく列全体＝data-column-statusを持つ
+      // .kanban-columnで判定する）。
+      document.getElementById("kanbanPanelBody").addEventListener("dragstart", (event) => {
+        const draggedCard = event.target.closest(".kanban-card[data-task-id]");
+        if (!draggedCard) return;
+        draggedTaskId = draggedCard.dataset.taskId;
+        event.dataTransfer.effectAllowed = "move";
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("dragover", (event) => {
+        if (event.target.closest(".kanban-column[data-column-status]")) event.preventDefault();
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("drop", (event) => {
+        const targetColumn = event.target.closest(".kanban-column[data-column-status]");
+        if (!targetColumn || !draggedTaskId) return;
+        event.preventDefault();
+        handleTaskDragDrop(draggedTaskId, targetColumn.dataset.columnStatus);
+        draggedTaskId = null;
       });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
