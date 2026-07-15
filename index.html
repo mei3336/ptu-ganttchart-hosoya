@@ -531,6 +531,58 @@
       white-space: nowrap;
       box-shadow: var(--shadow-small);
       transform: translate(-50%, -50%);
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .mindmap-node.is-dragging {
+      cursor: grabbing;
+      opacity: .85;
+      z-index: 10;
+    }
+
+    /* 折りたたみ中（子孫ノードを非表示にしている）ノードの見た目の目印。 */
+    .mindmap-node.is-collapsed-node {
+      border: 2px dashed var(--color-white);
+    }
+
+    /* マインドマップは他パネルよりノード配置の作業領域が必要なため、幅を広めにする。 */
+    .mindmap-slide-panel {
+      width: 900px;
+    }
+
+    /* 右クリックメニュー（モーダル・ダイアログ一覧P7）。位置はJSでtop/leftを指定する。 */
+    .mindmap-context-menu {
+      position: fixed;
+      z-index: 110;
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-medium);
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      min-width: 180px;
+    }
+
+    .mindmap-context-menu[hidden] {
+      display: none;
+    }
+
+    .mindmap-context-menu button {
+      text-align: left;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 4px;
+      background: none;
+      color: var(--color-text-dark);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .mindmap-context-menu button:hover {
+      background: var(--color-primary-light);
     }
 
     .panel-add-button {
@@ -934,10 +986,6 @@
         </div>
       </div>
     </section>
-    <section id="mindmapPanel" hidden>
-      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
-      <div id="mindmapPanelBody"></div>
-    </section>
   </main>
 
   <!-- モーダル・ダイアログ一覧②：右側スライドパネル（P1タスク管理）。ガント画面の上に
@@ -1021,6 +1069,28 @@
       <div id="changelogPanelBody"></div>
     </div>
   </aside>
+
+  <!-- P7：マインドマップ。ノードのドラッグ配置・右クリックメニュー（名前変更/子追加/兄弟追加/
+       折りたたみ/削除）に対応。他パネルより横幅が必要なため広めにする（CSSで個別指定）。 -->
+  <aside id="mindmapSlidePanel" class="slide-panel mindmap-slide-panel">
+    <div class="slide-panel-header">
+      <h2>マインドマップ</h2>
+      <button type="button" id="closeMindmapPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
+      <div id="mindmapPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- マインドマップの右クリックメニュー。位置はJSで動的にtop/leftを指定する。 -->
+  <div id="mindmapContextMenu" class="mindmap-context-menu" hidden>
+    <button type="button" data-action="rename">名前を変更 (F2)</button>
+    <button type="button" data-action="add-child">子ノード追加 (Tab)</button>
+    <button type="button" data-action="add-sibling">兄弟ノード追加 (Enter)</button>
+    <button type="button" data-action="toggle-collapse">折りたたみ (Space)</button>
+    <button type="button" data-action="delete">削除 (Del)</button>
+  </div>
 
   <!-- モーダル・ダイアログ一覧①：中央モーダルの共通の入れ物。中身はopenModal()で差し替える。 -->
   <div id="modalOverlay" class="modal-overlay" hidden>
@@ -1882,8 +1952,6 @@
     const collapsedScheduleIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
-    // 現在表示中のメインビュー（"gantt" | "kanban" | "mindmap"）。
-    let currentMainView = "gantt";
 
     // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
     const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
@@ -3093,24 +3161,6 @@
       ]);
     }
 
-    // 【設計判断：タスク管理(P1)は右側スライドパネル化したがマインドマップ(P7)はまだ未着手】
-    //   モーダル・ダイアログ一覧の訂正指示どおり、第2ヘッダー右側の7機能は本来すべて
-    //   ②右側スライドパネルであるべきだが、今回はP1（タスク管理）のみをスライドパネルへ
-    //   作り直した。マインドマップは旧方式（ガントと排他的に表示を切り替える）のまま
-    //   据え置いている（時間都合により別工程）。そのため switchMainView は
-    //   "gantt" | "mindmap" の2値のみを扱う（"kanban"はここでは扱わない）。
-    //
-    // 【前提】viewName は "gantt" | "mindmap" のいずれか。
-    // 【処理】該当するセクションだけを表示し、他は隠す。ヘッダー右側の「マインドマップ」
-    //   ボタンの選択状態も合わせて切り替える。データの再取得は行わない。
-    // 【結果】指定したビューだけが画面に表示される。
-    function switchMainView(viewName) {
-      currentMainView = viewName;
-      document.getElementById("ganttPanel").hidden = viewName !== "gantt";
-      document.getElementById("mindmapPanel").hidden = viewName !== "mindmap";
-      document.getElementById("switchToMindmapButton").classList.toggle("is-active", viewName === "mindmap");
-    }
-
     // 【前提】panelId はスライドパネル要素のid（例："kanbanSlidePanel"）。
     // 【処理】.is-openクラスの有無で開閉を反転させる（モーダル・ダイアログ一覧②：
     //   ボタンをもう一度押すと閉じる、という共通挙動）。
@@ -3770,19 +3820,15 @@
 
     // 【前提】なし。
     // 【処理】タスク管理（P1）は右側スライドパネルの開閉トグル（toggleSlidePanel）。
-    //   マインドマップはまだ旧方式のまま、現在のビューが対象ビューなら「ガント」へ戻し、
-    //   そうでなければ対象ビューへ切り替える（仕様書に明記の無いトグル的な挙動として、
-    //   もう一度押すとガントに戻る形にした＝今回の判断ポイント。P7スライドパネル化は別工程）。
-    // 【結果】タスク管理パネルの開閉、またはメインビューの切り替えが行われる。
+    //   マインドマップ（P7）もSIDE_PANEL_DEFINITIONS経由の共通配線に統合済みのため、
+    //   ここではP1のみを扱う（P1は既存の専用ハンドラのまま据え置いている）。
+    // 【結果】タスク管理パネルの開閉が行われる。
     function handleSwitchToKanbanButtonClick() {
       toggleSlidePanel("kanbanSlidePanel");
       document.getElementById("switchToKanbanButton").classList.toggle(
         "is-active",
         document.getElementById("kanbanSlidePanel").classList.contains("is-open")
       );
-    }
-    function handleSwitchToMindmapButtonClick() {
-      switchMainView(currentMainView === "mindmap" ? "gantt" : "mindmap");
     }
 
     // 【前提】event.currentTargetがdata-out-of-scope-label属性を持つボタンであること。
@@ -3827,7 +3873,6 @@
       document.getElementById("toggleColumnEndDateButton").addEventListener("click", (event) => handleToggleColumnClick("endDate", event.currentTarget));
       document.getElementById("toggleColumnStatusButton").addEventListener("click", (event) => handleToggleColumnClick("status", event.currentTarget));
       document.getElementById("switchToKanbanButton").addEventListener("click", handleSwitchToKanbanButtonClick);
-      document.getElementById("switchToMindmapButton").addEventListener("click", handleSwitchToMindmapButtonClick);
       for (const outOfScopeButton of document.querySelectorAll("[data-out-of-scope-label]")) {
         outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
       }
@@ -3873,7 +3918,7 @@
         draggedScheduleId = null;
       });
 
-      // P2〜P6：右側スライドパネルの開閉配線。5パネルとも「ボタンでトグル開閉・
+      // P2〜P7：右側スライドパネルの開閉配線。6パネルとも「ボタンでトグル開閉・
       // 開いた瞬間に最新データへ再描画・×ボタンで必ず閉じる」という共通の挙動のため、
       // 定義テーブル1つと共通のwire関数にまとめる（P1タスク管理は既存の専用ハンドラの
       // ままとし、ここでは触れない）。
@@ -3883,6 +3928,7 @@
         { panelId: "memoSlidePanel", buttonId: "memoButton", closeButtonId: "closeMemoPanelButton", onOpen: () => refreshMemoPanel(currentSelectedProjectId) },
         { panelId: "commentSlidePanel", buttonId: "commentButton", closeButtonId: "closeCommentPanelButton", onOpen: () => refreshCommentPanel(currentSelectedProjectId) },
         { panelId: "changelogSlidePanel", buttonId: "changelogButton", closeButtonId: "closeChangelogPanelButton", onOpen: () => refreshChangelogPanel(currentSelectedProjectId) },
+        { panelId: "mindmapSlidePanel", buttonId: "switchToMindmapButton", closeButtonId: "closeMindmapPanelButton", onOpen: () => refreshMindmapPanel(currentSelectedProjectId) },
       ];
       for (const definition of SIDE_PANEL_DEFINITIONS) {
         document.getElementById(definition.buttonId).addEventListener("click", () => {
