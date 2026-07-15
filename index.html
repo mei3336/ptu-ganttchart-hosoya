@@ -4,8 +4,176 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GanttForge再現アプリ</title>
+  <style>
+    /* 配色はUIデザイン仕様書のパレットから、今回使う分だけを変数として最小定義する。
+       DM Sans等の外部フォントはCDN読込（ネットワーク依存）になるため採用せず、
+       システムフォントで代替する（見た目の作り込みは最小限でよいという方針のため）。 */
+    :root {
+      --color-bg-page: #F3F4F6;
+      --color-bg-surface: #F9FAFB;
+      --color-bg-white: #FFFFFF;
+      --color-border: #D1D5DB;
+      --color-text-dark: #111827;
+      --color-text-mid: #374151;
+      --color-text-light: #6B7280;
+      --color-accent: #2563EB;
+      --color-accent-hover: #1D4ED8;
+    }
+
+    body {
+      margin: 0;
+      background: var(--color-bg-page);
+      color: var(--color-text-dark);
+      font-family: -apple-system, "Segoe UI", "Hiragino Sans", sans-serif;
+      font-size: 13px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--color-bg-white);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    nav#panelTabNav {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      background: var(--color-bg-surface);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .tab-button {
+      padding: 6px 14px;
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: var(--color-bg-white);
+      color: var(--color-text-mid);
+      cursor: pointer;
+    }
+
+    .tab-button.is-active {
+      background: var(--color-accent);
+      color: var(--color-bg-white);
+      border-color: var(--color-accent);
+    }
+
+    main {
+      padding: 16px;
+    }
+
+    .panel {
+      background: var(--color-bg-white);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    #createProjectButton,
+    .panel-add-button {
+      padding: 6px 12px;
+      border: 1px solid var(--color-accent);
+      border-radius: 8px;
+      background: var(--color-bg-white);
+      color: var(--color-accent);
+      cursor: pointer;
+    }
+
+    #createProjectButton:hover,
+    .panel-add-button:hover {
+      background: var(--color-accent-hover);
+      color: var(--color-bg-white);
+    }
+
+    table.schedule-tree-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    table.schedule-tree-table th,
+    table.schedule-tree-table td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--color-border);
+      font-size: 13px;
+    }
+
+    .kanban-board {
+      display: flex;
+      gap: 12px;
+    }
+
+    .kanban-column {
+      flex: 1;
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 8px;
+    }
+
+    .kanban-column h3 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      color: var(--color-text-mid);
+    }
+
+    .kanban-card {
+      background: var(--color-bg-white);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 8px;
+      margin-bottom: 8px;
+    }
+
+    ul.issue-tree-list {
+      list-style: none;
+      margin: 0;
+      padding-left: 0;
+    }
+
+    .issue-tree-list li {
+      padding: 4px 0;
+    }
+
+    .empty-state-message {
+      color: var(--color-text-light);
+    }
+  </style>
 </head>
 <body>
+  <header>
+    <label for="projectSelectDropdown">プロジェクト：</label>
+    <select id="projectSelectDropdown"></select>
+    <button id="createProjectButton" type="button">＋ 新規プロジェクト</button>
+  </header>
+
+  <nav id="panelTabNav">
+    <button type="button" data-panel-name="gantt" class="tab-button is-active">ガントチャート</button>
+    <button type="button" data-panel-name="kanban" class="tab-button">タスク管理</button>
+    <button type="button" data-panel-name="mindmap" class="tab-button">マインドマップ</button>
+  </nav>
+
+  <main>
+    <section id="ganttPanel" class="panel">
+      <button id="addScheduleButton" class="panel-add-button" type="button">＋ スケジュール追加</button>
+      <div id="ganttPanelBody"></div>
+    </section>
+    <section id="kanbanPanel" class="panel" hidden>
+      <button id="addTaskButton" class="panel-add-button" type="button">＋ タスク追加</button>
+      <div id="kanbanPanelBody"></div>
+    </section>
+    <section id="mindmapPanel" class="panel" hidden>
+      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
+      <div id="mindmapPanelBody"></div>
+    </section>
+  </main>
+
   <script>
     "use strict";
 
@@ -826,6 +994,407 @@
       }
 
       return idsToDelete;
+    }
+
+    // ===== 最小限UI：状態・純粋関数（DOM非依存） =====
+    // 【設計判断】このセクションの関数は「データ配列を受け取り、データ/文字列を返す」だけの
+    //   純粋関数と、実際にDOMへ反映する薄い関数に分ける。前者はdocumentに一切触れないため、
+    //   ブラウザが無い環境（Node.js等）でも配列を渡すだけで動作を検証できる。
+
+    // 現在選択中のプロジェクトのid。未選択時はnull。
+    let currentSelectedProjectId = null;
+
+    // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
+    const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
+
+    // 【前提】rawText はユーザー入力を含みうる未エスケープの文字列（null/undefinedの可能性あり）。
+    // 【処理】HTML特殊文字（& < > " '）を実体参照に置き換え、意図しないタグ・属性の注入を防ぐ。
+    // 【結果】そのままHTML文字列に埋め込んでよいエスケープ済み文字列を返す。
+    function escapeHtmlText(rawText) {
+      return String(rawText ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    // 【前提】scheduleList は同一プロジェクト内のスケジュール全件（親子関係はparentIdで表現）。
+    // 【処理】親→子の順にたどり、各行がツリー上で何階層目か（depthLevel、ルートは0）を付与する。
+    //   同じ親を持つ兄弟同士はorderの昇順に揃える。
+    // 【結果】ガントチャートの行として上から順に描画できる配列 {schedule, depthLevel}[] を返す。
+    function buildScheduleTreeRows(scheduleList) {
+      const childSchedulesByParentId = new Map();
+      const rootSchedules = [];
+      for (const schedule of scheduleList) {
+        if (schedule.parentId === null || schedule.parentId === undefined) {
+          rootSchedules.push(schedule);
+          continue;
+        }
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
+
+      const sortByOrder = (a, b) => a.order - b.order;
+      rootSchedules.sort(sortByOrder);
+      for (const childSchedules of childSchedulesByParentId.values()) {
+        childSchedules.sort(sortByOrder);
+      }
+
+      const scheduleTreeRows = [];
+      function appendScheduleAndDescendants(schedule, depthLevel) {
+        scheduleTreeRows.push({ schedule, depthLevel });
+        const childSchedules = childSchedulesByParentId.get(schedule.id) || [];
+        for (const childSchedule of childSchedules) {
+          appendScheduleAndDescendants(childSchedule, depthLevel + 1);
+        }
+      }
+      for (const rootSchedule of rootSchedules) {
+        appendScheduleAndDescendants(rootSchedule, 0);
+      }
+      return scheduleTreeRows;
+    }
+
+    // 【前提】taskList は同一プロジェクト内のタスク全件。
+    // 【処理】status（"backlog"|"doing"|"done"）で3列に振り分け、各列内はorderの昇順に揃える。
+    // 【結果】カンバンの3列分のタスク配列 {backlog, doing, done} を返す。
+    function groupTasksByStatus(taskList) {
+      const sortByOrder = (a, b) => a.order - b.order;
+      return {
+        backlog: taskList.filter((task) => task.status === "backlog").sort(sortByOrder),
+        doing: taskList.filter((task) => task.status === "doing").sort(sortByOrder),
+        done: taskList.filter((task) => task.status === "done").sort(sortByOrder),
+      };
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件（親子関係はparentNodeIdで表現）。
+    //   issuesにはparentNodeIdのインデックスが無いため（getIssuesByProjectのコメント参照）、
+    //   この関数はDB層ではなくアプリ層でのツリー構築を担う。
+    // 【処理】buildScheduleTreeRowsと同じ考え方で、親→子の順にdepthLevelを付与する。
+    // 【結果】マインドマップ一覧として上から順に描画できる配列 {issue, depthLevel}[] を返す。
+    function buildIssueTreeRows(issueList) {
+      const childIssuesByParentNodeId = new Map();
+      const rootIssues = [];
+      for (const issue of issueList) {
+        if (issue.parentNodeId === null || issue.parentNodeId === undefined) {
+          rootIssues.push(issue);
+          continue;
+        }
+        if (!childIssuesByParentNodeId.has(issue.parentNodeId)) {
+          childIssuesByParentNodeId.set(issue.parentNodeId, []);
+        }
+        childIssuesByParentNodeId.get(issue.parentNodeId).push(issue);
+      }
+
+      const sortByOrder = (a, b) => a.order - b.order;
+      rootIssues.sort(sortByOrder);
+      for (const childIssues of childIssuesByParentNodeId.values()) {
+        childIssues.sort(sortByOrder);
+      }
+
+      const issueTreeRows = [];
+      function appendIssueAndDescendants(issue, depthLevel) {
+        issueTreeRows.push({ issue, depthLevel });
+        const childIssues = childIssuesByParentNodeId.get(issue.id) || [];
+        for (const childIssue of childIssues) {
+          appendIssueAndDescendants(childIssue, depthLevel + 1);
+        }
+      }
+      for (const rootIssue of rootIssues) {
+        appendIssueAndDescendants(rootIssue, 0);
+      }
+      return issueTreeRows;
+    }
+
+    // 【前提】projectList はプロジェクト全件。selectedProjectId は現在<select>に選ばせたいid。
+    // 【処理】<option>タグのHTML文字列を組み立てる（DOMには触れない）。
+    // 【結果】<select>のinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderProjectOptionsToHtml(projectList, selectedProjectId) {
+      if (projectList.length === 0) {
+        return '<option value="">(プロジェクトがありません)</option>';
+      }
+      return projectList
+        .map((project) => {
+          const isSelectedAttribute = project.id === selectedProjectId ? " selected" : "";
+          return `<option value="${escapeHtmlText(project.id)}"${isSelectedAttribute}>${escapeHtmlText(project.name)}</option>`;
+        })
+        .join("");
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。
+    // 【処理】階層の深さをインデント（全角スペース）で表現した表形式のHTML文字列を組み立てる。
+    //   バー描画は行わず、テーブルによる簡易表示に留める（今回のスコープ方針）。
+    // 【結果】ガントパネルのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderScheduleTreeRowsToHtml(scheduleTreeRows) {
+      if (scheduleTreeRows.length === 0) {
+        return '<p class="empty-state-message">スケジュールがありません。</p>';
+      }
+      const bodyRowsHtml = scheduleTreeRows
+        .map(({ schedule, depthLevel }) => {
+          const indentedName = "　".repeat(depthLevel) + escapeHtmlText(schedule.name);
+          const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
+          return `<tr>
+            <td>${indentedName}</td>
+            <td>${escapeHtmlText(schedule.startDate)}</td>
+            <td>${escapeHtmlText(schedule.endDate)}</td>
+            <td>${escapeHtmlText(schedule.assignee)}</td>
+            <td>${escapeHtmlText(statusLabel)}</td>
+          </tr>`;
+        })
+        .join("");
+      return `<table class="schedule-tree-table">
+        <thead><tr><th>スケジュール名</th><th>開始日</th><th>終了日</th><th>担当者</th><th>状態</th></tr></thead>
+        <tbody>${bodyRowsHtml}</tbody>
+      </table>`;
+    }
+
+    // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の日本語見出し。
+    // 【処理】1列分のカンバンカードのHTML文字列を組み立てる。
+    // 【結果】renderKanbanBoardToHtml から列単位で呼び出されるHTML文字列を返す。
+    function renderKanbanColumnToHtml(taskListForColumn, columnLabel) {
+      const cardsHtml =
+        taskListForColumn.length === 0
+          ? '<p class="empty-state-message">タスクがありません。</p>'
+          : taskListForColumn.map((task) => `<div class="kanban-card">${escapeHtmlText(task.title)}</div>`).join("");
+      return `<div class="kanban-column"><h3>${escapeHtmlText(columnLabel)}</h3>${cardsHtml}</div>`;
+    }
+
+    // 【前提】taskGroupsByStatus は groupTasksByStatus の戻り値。
+    // 【処理】backlog/doing/doneの3列を横に並べたカンバンボード全体のHTML文字列を組み立てる。
+    // 【結果】カンバンパネルのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderKanbanBoardToHtml(taskGroupsByStatus) {
+      return `<div class="kanban-board">
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.backlog, "未着手")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.doing, "進行中")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.done, "完了")}
+      </div>`;
+    }
+
+    // 【前提】issueTreeRows は buildIssueTreeRows の戻り値。
+    // 【処理】階層の深さをインデント（左パディング）で表現したリスト形式のHTML文字列を組み立てる。
+    //   座標（x,y）を使った視覚的配置は行わず、リストによる簡易表示に留める（今回のスコープ方針）。
+    // 【結果】マインドマップパネルのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderIssueTreeRowsToHtml(issueTreeRows) {
+      if (issueTreeRows.length === 0) {
+        return '<p class="empty-state-message">マインドマップノードがありません。</p>';
+      }
+      const itemsHtml = issueTreeRows
+        .map(({ issue, depthLevel }) => {
+          const indentPixels = depthLevel * 20;
+          return `<li style="padding-left:${indentPixels}px">${escapeHtmlText(issue.title)}</li>`;
+        })
+        .join("");
+      return `<ul class="issue-tree-list">${itemsHtml}</ul>`;
+    }
+
+    // ===== 最小限UI：DOM反映（薄い関数） =====
+    // 【設計判断】以下は「HTML文字列を対応する要素のinnerHTMLへ入れるだけ」の薄い関数に留める。
+    //   ロジック（何を表示するか）は上の純粋関数側に寄せ、ここでは判断を持たせない。
+
+    function applyProjectSelectOptions(optionsHtml) {
+      document.getElementById("projectSelectDropdown").innerHTML = optionsHtml;
+    }
+
+    function applyGanttPanel(bodyHtml) {
+      document.getElementById("ganttPanelBody").innerHTML = bodyHtml;
+    }
+
+    function applyKanbanPanel(bodyHtml) {
+      document.getElementById("kanbanPanelBody").innerHTML = bodyHtml;
+    }
+
+    function applyMindmapPanel(bodyHtml) {
+      document.getElementById("mindmapPanelBody").innerHTML = bodyHtml;
+    }
+
+    // ===== 最小限UI：統括（データ取得→純粋関数→DOM反映のつなぎ） =====
+
+    // 【前提】なし（常に全プロジェクトを取得する。projectsはインデックス無し＝常に全件表示の設計のため）。
+    // 【処理】getAllProjectsで最新の一覧を取得し、現在選択中のprojectIdを選択状態にして<select>へ反映する。
+    // 【結果】<select>の中身が最新のプロジェクト一覧に更新される。
+    async function refreshProjectSelectDropdown() {
+      const projectList = await getAllProjects();
+      applyProjectSelectOptions(renderProjectOptionsToHtml(projectList, currentSelectedProjectId));
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】projectIdがnullなら「プロジェクトを選択してください」という空状態を表示し、
+    //   そうでなければgetSchedulesByProjectで取得してツリー化・HTML化してガントパネルへ反映する。
+    // 【結果】ガントパネルの表示が最新の状態に更新される。
+    async function refreshGanttPanel(projectId) {
+      if (!projectId) {
+        applyGanttPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const scheduleList = await getSchedulesByProject(projectId);
+      applyGanttPanel(renderScheduleTreeRowsToHtml(buildScheduleTreeRows(scheduleList)));
+    }
+
+    // refreshGanttPanelと同じ考え方。対象はtasks・カンバンボード。
+    async function refreshKanbanPanel(projectId) {
+      if (!projectId) {
+        applyKanbanPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const taskList = await getTasksByProject(projectId);
+      applyKanbanPanel(renderKanbanBoardToHtml(groupTasksByStatus(taskList)));
+    }
+
+    // refreshGanttPanelと同じ考え方。対象はissues・マインドマップ一覧。
+    async function refreshMindmapPanel(projectId) {
+      if (!projectId) {
+        applyMindmapPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const issueList = await getIssuesByProject(projectId);
+      applyMindmapPanel(renderIssueTreeRowsToHtml(buildIssueTreeRows(issueList)));
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】現在選択中のプロジェクトを切り替え、3パネル（ガント・カンバン・マインドマップ）を
+    //   まとめて最新の状態に更新する。
+    // 【結果】currentSelectedProjectIdが更新され、3パネルの表示が新しいプロジェクトのものになる。
+    async function switchToProject(projectId) {
+      currentSelectedProjectId = projectId || null;
+      await Promise.all([
+        refreshGanttPanel(currentSelectedProjectId),
+        refreshKanbanPanel(currentSelectedProjectId),
+        refreshMindmapPanel(currentSelectedProjectId),
+      ]);
+    }
+
+    // 【前提】panelName は "gantt" | "kanban" | "mindmap" のいずれか。
+    // 【処理】該当するパネルだけを表示し、他は隠す。タブボタンの選択状態も合わせて切り替える。
+    //   データの再取得は行わない（表示・非表示の切り替えのみの責務）。
+    // 【結果】指定したパネルだけが画面に表示される。
+    function switchActivePanelTab(panelName) {
+      for (const panelElement of document.querySelectorAll(".panel")) {
+        panelElement.hidden = panelElement.id !== `${panelName}Panel`;
+      }
+      for (const tabButton of document.querySelectorAll(".tab-button")) {
+        tabButton.classList.toggle("is-active", tabButton.dataset.panelName === panelName);
+      }
+    }
+
+    // ===== 最小限UI：追加ボタンのイベントハンドラ =====
+    // 【設計判断】prompt()による最小限の入力収集のみを行う（バリデーション・詳細フォームは
+    //   今回のスコープ外）。データが1件も無いと「動いてデータが表示される」の確認自体が
+    //   できないため、各ストアに最低限の追加手段だけを用意する。削除UIは今回のスコープ外。
+
+    async function handleCreateProjectButtonClick() {
+      const projectName = window.prompt("プロジェクト名を入力してください");
+      if (!projectName) return;
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      const newProject = {
+        id: generateId(),
+        name: projectName,
+        startDate: todayDateString,
+        endDate: todayDateString,
+        milestones: [],
+        locked: false,
+        createdAt: new Date().toISOString(),
+      };
+      await addProject(newProject);
+      await refreshProjectSelectDropdown();
+      document.getElementById("projectSelectDropdown").value = newProject.id;
+      await switchToProject(newProject.id);
+    }
+
+    async function handleAddScheduleButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const scheduleName = window.prompt("スケジュール名を入力してください");
+      if (!scheduleName) return;
+      await addSchedule({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        parentId: null,
+        name: scheduleName,
+        startDate: "",
+        endDate: "",
+        assignee: "",
+        taskStatus: "todo",
+        notes: "",
+        color: "#2563EB",
+        order: 0,
+      });
+      await refreshGanttPanel(currentSelectedProjectId);
+    }
+
+    async function handleAddTaskButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const taskTitle = window.prompt("タスクのタイトルを入力してください");
+      if (!taskTitle) return;
+      await addTask({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: taskTitle,
+        status: "backlog",
+        done: false,
+        doneAt: null,
+        priority: 4,
+        dueDate: "",
+        description: "",
+        order: 0,
+      });
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
+    async function handleAddIssueButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const issueTitle = window.prompt("ノードのタイトルを入力してください");
+      if (!issueTitle) return;
+      await addIssue({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: issueTitle,
+        parentNodeId: null,
+        x: 0,
+        y: 0,
+        color: "#2563EB",
+        order: 0,
+      });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】DOMの構築が完了していること（DOMContentLoaded後に呼ばれる想定）。
+    // 【処理】各ボタン・タブ・<select>にイベントを登録し、プロジェクト一覧を取得して
+    //   先頭のプロジェクトを初期選択状態にする。
+    // 【結果】画面を開いた直後から、先頭プロジェクトのデータが3パネルに表示された状態になる
+    //   （プロジェクトが1件も無い場合は空状態表示のまま）。
+    async function initializeApp() {
+      document.getElementById("projectSelectDropdown").addEventListener("change", (event) => {
+        switchToProject(event.target.value || null);
+      });
+      document.getElementById("createProjectButton").addEventListener("click", handleCreateProjectButtonClick);
+      document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
+      document.getElementById("addTaskButton").addEventListener("click", handleAddTaskButtonClick);
+      document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
+      for (const tabButton of document.querySelectorAll(".tab-button")) {
+        tabButton.addEventListener("click", () => switchActivePanelTab(tabButton.dataset.panelName));
+      }
+
+      const projectList = await getAllProjects();
+      await refreshProjectSelectDropdown();
+      const firstProjectId = projectList.length > 0 ? projectList[0].id : null;
+      document.getElementById("projectSelectDropdown").value = firstProjectId || "";
+      await switchToProject(firstProjectId);
+    }
+
+    // Node.js等、windowが存在しない環境（自動テスト）でこのスクリプトを評価しても
+    // 起動処理が実行されないようにするガード（この関数群を純粋関数として単体テストするため）。
+    if (typeof window !== "undefined") {
+      window.addEventListener("DOMContentLoaded", initializeApp);
     }
   </script>
 </body>
