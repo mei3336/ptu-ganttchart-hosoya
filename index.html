@@ -519,6 +519,7 @@
     .kanban-card-main {
       flex: 1;
       min-width: 0;
+      cursor: pointer;
     }
 
     /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
@@ -2577,6 +2578,9 @@
 
     // タスクのpriority（1:高〜4:なし）の日本語表示名（データモデル設計3.3節）。
     const TASK_PRIORITY_LABELS = { 1: "高", 2: "中", 3: "低", 4: "なし" };
+    // タスクのstatus（backlog/doing/done）の日本語表示名。カンバン列見出しと編集モーダルの
+    // ステータス選択で共有する。
+    const TASK_STATUS_LABELS = { backlog: "未着手", doing: "進行中", done: "完了" };
 
     // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の
     //   日本語見出し。columnStatusValue はそのstatus文字列（追加フォームの送信先に使う）。
@@ -2591,13 +2595,16 @@
         taskListForColumn.length === 0
           ? '<p class="empty-state-message">タスクがありません。</p>'
           : taskListForColumn
-              .map(
-                (task) =>
-                  `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}">
-                    <div class="kanban-card-main">${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
+              .map((task) => {
+                const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
+                return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}">
+                    <div class="kanban-card-main" data-action="edit-task">
+                      <div>${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
+                      ${dueDateHtml}
+                    </div>
                     <button type="button" class="wbs-icon-button" data-action="delete-task" title="削除">🗑</button>
-                  </div>`
-              )
+                  </div>`;
+              })
               .join("");
 
       const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
@@ -3875,6 +3882,98 @@
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
+    // 【前提】task は編集対象の既存タスクオブジェクト。
+    // 【処理】タイトル・ステータス・優先度・期日・メモ（詳細）の入力欄を持つモーダルの
+    //   HTML文字列を組み立てる（詳細設計書3.3.2：saveTodoEdit相当。作成後は一切編集
+    //   できなかった従来の制約を解消する。新規作成は列埋め込みフォームで行うため、
+    //   このモーダルは編集専用で新規作成モードを持たない）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderTaskModalToHtml(task) {
+      const statusOptionsHtml = Object.entries(TASK_STATUS_LABELS)
+        .map(([value, label]) => `<option value="${value}"${value === task.status ? " selected" : ""}>${label}</option>`)
+        .join("");
+      const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
+        .map(([value, label]) => `<option value="${value}"${Number(value) === task.priority ? " selected" : ""}>${label}</option>`)
+        .join("");
+      return `
+        <h2>タスク編集</h2>
+        <div class="modal-field">
+          <label for="taskModalTitleInput">タスク名</label>
+          <input type="text" id="taskModalTitleInput" value="${escapeHtmlText(task.title)}">
+        </div>
+        <div class="modal-field">
+          <label for="taskModalStatusSelect">ステータス</label>
+          <select id="taskModalStatusSelect">${statusOptionsHtml}</select>
+        </div>
+        <div class="modal-field">
+          <label for="taskModalPrioritySelect">優先度</label>
+          <select id="taskModalPrioritySelect">${priorityOptionsHtml}</select>
+        </div>
+        <div class="modal-field">
+          <label for="taskModalDueDateInput">期日</label>
+          <input type="date" id="taskModalDueDateInput" value="${escapeHtmlText(task.dueDate || "")}">
+        </div>
+        <div class="modal-field">
+          <label for="taskModalDescriptionTextarea">メモ（詳細）</label>
+          <textarea id="taskModalDescriptionTextarea" rows="4">${escapeHtmlText(task.description || "")}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="taskModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="taskModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】task は編集対象の既存タスクオブジェクト。
+    // 【処理】タスク編集モーダルを開き、キャンセル・保存にイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openTaskEditModal(task) {
+      openModal(renderTaskModalToHtml(task));
+      document.getElementById("taskModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("taskModalSaveButton").addEventListener("click", () => handleTaskModalSaveButtonClick(task));
+    }
+
+    // 【前提】existingTask は編集開始時点のタスクオブジェクト。
+    // 【処理】モーダル内の入力値を読み取り、タイトルが空でなければaddTaskで上書き保存する。
+    //   ステータスを"done"に変更した場合はdoneAtを現在時刻にし、"done"以外に変更した場合は
+    //   done/doneAtをリセットする（列埋め込みフォームでの新規作成時と同じ不変条件を維持する。
+    //   すでに"done"だった場合はdoneAtの上書きをせず、最初に完了した時刻を保持する）。
+    // 【結果】保存成功時はモーダルを閉じ、カンバンパネルを更新する。
+    async function handleTaskModalSaveButtonClick(existingTask) {
+      const title = document.getElementById("taskModalTitleInput").value.trim();
+      if (!title) {
+        window.alert("タスク名を入力してください");
+        return;
+      }
+      const status = document.getElementById("taskModalStatusSelect").value;
+      const priority = Number(document.getElementById("taskModalPrioritySelect").value);
+      const dueDate = document.getElementById("taskModalDueDateInput").value;
+      const description = document.getElementById("taskModalDescriptionTextarea").value;
+      const taskToSave = {
+        ...existingTask,
+        title,
+        status,
+        priority,
+        dueDate,
+        description,
+        done: status === "done",
+        doneAt: status === "done" ? (existingTask.status === "done" ? existingTask.doneAt : new Date().toISOString()) : null,
+      };
+      await addTask(taskToSave);
+      closeModal();
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】taskId はクリックされたカードのタスクid。
+    // 【処理】最新のタスク一覧から対象を探し、編集モーダルを開く。
+    // 【結果】編集モーダルが表示される。
+    async function handleOpenTaskEditModalClick(taskId) {
+      const taskList = await getTasksByProject(currentSelectedProjectId);
+      const task = taskList.find((candidateTask) => candidateTask.id === taskId);
+      if (!task) return;
+      openTaskEditModal(task);
+    }
+
     async function handleAddIssueButtonClick() {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
@@ -4248,6 +4347,12 @@
         if (deleteButton) {
           const card = deleteButton.closest("[data-task-id]");
           if (card) handleDeleteTaskButtonClick(card.dataset.taskId);
+          return;
+        }
+        const editArea = event.target.closest('[data-action="edit-task"]');
+        if (editArea) {
+          const card = editArea.closest("[data-task-id]");
+          if (card) handleOpenTaskEditModalClick(card.dataset.taskId);
           return;
         }
         if (event.target.id === "clearDoneTasksButton") handleClearDoneTasksButtonClick();
