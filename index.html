@@ -39,6 +39,14 @@
       --timeline-header-height: 82px;
       --milestone-marker-height: 20px;
       --wbs-panel-width: 520px;
+      --header-primary-height: 52px;
+      --header-secondary-height: 34px;
+      /* ガント本体の最低の高さ（グリッド背景・今日マーカーが画面の表示領域の下端まで
+         届くようにするため）。第1・第2ヘッダーとタイムラインヘッダーの高さを画面の高さ
+         から差し引いた残りとする。ロック帯（表示時のみ現れる）の高さはCSSだけでは
+         動的に計算できないため考慮していない（表示中は本体の下端がその分だけ画面外に
+         はみ出す可能性があるが、機能的な問題ではないため許容する）。 */
+      --gantt-body-min-height: calc(100vh - var(--header-primary-height) - var(--header-secondary-height) - var(--timeline-header-height));
     }
 
     * {
@@ -67,14 +75,14 @@
     }
 
     .app-header-primary {
-      height: 52px;
+      height: var(--header-primary-height);
       background: var(--color-white);
       border-bottom: 1px solid var(--color-border);
       box-shadow: var(--shadow-small);
     }
 
     .app-header-secondary {
-      height: 34px;
+      height: var(--header-secondary-height);
       background: var(--color-surface-2);
       border-bottom: 1px solid var(--color-border);
       font-size: 12px;
@@ -219,6 +227,57 @@
       color: var(--color-text-mid);
     }
 
+    /* モーダル・ダイアログ一覧「1. スケジュール行のホバー時操作アイコン一式」：
+       通常はうっすら（非表示）にしておき、行にマウスを乗せたときだけ現れる。
+       アイコン自体は常にDOMにあり、opacityで見た目だけを切り替える
+       （クリック領域を安定させるため、display:noneにはしない）。 */
+    .wbs-row-icons {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 0 0 auto;
+      opacity: 0;
+      transition: opacity .12s ease;
+    }
+
+    .wbs-row:hover .wbs-row-icons {
+      opacity: 1;
+    }
+
+    .wbs-header-row .wbs-row-icons {
+      flex: 0 0 auto;
+      width: 112px;
+    }
+
+    .wbs-icon-button {
+      width: 18px;
+      height: 18px;
+      line-height: 16px;
+      padding: 0;
+      border: 1px solid var(--color-border-dark);
+      border-radius: 4px;
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .wbs-icon-button:hover:not(:disabled) {
+      background: var(--color-primary-light);
+      border-color: var(--color-accent);
+    }
+
+    .wbs-icon-button:disabled {
+      opacity: .35;
+      cursor: not-allowed;
+    }
+
+    .wbs-icon-spacer {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+    }
+
     .gantt-scroll-area {
       flex: 1;
       overflow-x: auto;
@@ -334,6 +393,17 @@
       bottom: 0;
       width: 0;
       border-left: 1px dashed var(--color-border-dark);
+    }
+
+    /* 「今日」を示す縦のハイライト線。マイルストーン線と同じくtop:0;bottom:0で
+       .gantt-body（親要素）の高さいっぱいに伸びる（JS側では高さを指定しない）。 */
+    .gantt-today-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--color-danger);
+      z-index: 1;
     }
 
     .gantt-milestone-diamond {
@@ -1540,6 +1610,9 @@
     // WBSパネルの追加列（開始/終了/状態）の表示状態。基本設計書2.2節の固定順（開始→終了→状態）で
     // 右側から列を追加する仕様のため、この順序のままレンダリングする。
     const visibleWbsColumns = { startDate: false, endDate: false, status: false };
+    // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
+    // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
+    const collapsedScheduleIds = new Set();
     // 現在表示中のメインビュー（"gantt" | "kanban" | "mindmap"）。
     let currentMainView = "gantt";
 
@@ -1570,12 +1643,21 @@
         .replaceAll("'", "&#39;");
     }
 
+    // 基本設計書4.1節：親→子→孫の3階層まで（ひ孫＝孫の子は作成不可）。depthLevelは0始まりのため、
+    // 「これ以上子を追加できない最大depthLevel」は2（孫）。子追加ボタンの無効化判定に使う。
+    const MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN = 2;
+
     // 【前提】scheduleList は同一プロジェクト内のスケジュール全件（親子関係はparentIdで表現）。
     // 【処理】親→子の順にたどり、各行がツリー上で何階層目か（depthLevel、ルートは0）、
-    //   および子を1件でも持つか（hasChildren）を付与する。同じ親を持つ兄弟同士はorderの昇順に揃える。
+    //   子を1件でも持つか（hasChildren）、兄弟内の位置（siblingIndex・siblingCount）を付与する。
+    //   同じ親を持つ兄弟同士はorderの昇順に揃える。
     //   hasChildrenは、ガントのバー描画で「親行の太いバー」と「葉（子なし）行の細いバー」を
     //   区別するために必要（UIデザイン仕様書3章）。
-    // 【結果】ガントチャートの行として上から順に描画できる配列 {schedule, depthLevel, hasChildren}[] を返す。
+    //   siblingIndex/siblingCountは、上下矢印の並び替えが「同一階層（同じ親を持つ兄弟グループ）
+    //   内でのみ可能」「先頭行では上矢印、末尾行では下矢印を無効化」という基本設計書4.1節の
+    //   仕様を判定するために必要。
+    // 【結果】ガントチャートの行として上から順に描画できる配列
+    //   {schedule, depthLevel, hasChildren, siblingIndex, siblingCount}[] を返す。
     function buildScheduleTreeRows(scheduleList) {
       const childSchedulesByParentId = new Map();
       const rootSchedules = [];
@@ -1597,17 +1679,62 @@
       }
 
       const scheduleTreeRows = [];
-      function appendScheduleAndDescendants(schedule, depthLevel) {
+      function appendScheduleAndDescendants(schedule, depthLevel, siblingIndex, siblingCount) {
         const childSchedules = childSchedulesByParentId.get(schedule.id) || [];
-        scheduleTreeRows.push({ schedule, depthLevel, hasChildren: childSchedules.length > 0 });
-        for (const childSchedule of childSchedules) {
-          appendScheduleAndDescendants(childSchedule, depthLevel + 1);
+        scheduleTreeRows.push({
+          schedule,
+          depthLevel,
+          hasChildren: childSchedules.length > 0,
+          siblingIndex,
+          siblingCount,
+        });
+        childSchedules.forEach((childSchedule, childIndex) => {
+          appendScheduleAndDescendants(childSchedule, depthLevel + 1, childIndex, childSchedules.length);
+        });
+      }
+      rootSchedules.forEach((rootSchedule, rootIndex) => {
+        appendScheduleAndDescendants(rootSchedule, 0, rootIndex, rootSchedules.length);
+      });
+      return scheduleTreeRows;
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値（深さ優先順）。
+    // 【処理】各行のWBS番号（例：1, 1.1, 1.1.1, 1.2, 2, 2.1）を計算する。
+    //   深さごとにカウンタを持ち、ある深さの行が現れるたびにそのカウンタを+1し、
+    //   それより深い階層のカウンタは（兄弟が変われば無効になるため）切り捨てる。
+    //   深さ優先順（親→その子孫全部→次の兄弟）で辿ることが前提のアルゴリズム。
+    // 【結果】スケジュールid→WBS番号文字列 のMapを返す。
+    function calculateWbsNumbers(scheduleTreeRows) {
+      const counters = [];
+      const wbsNumberByScheduleId = new Map();
+      for (const { schedule, depthLevel } of scheduleTreeRows) {
+        counters[depthLevel] = (counters[depthLevel] || 0) + 1;
+        counters.length = depthLevel + 1;
+        wbsNumberByScheduleId.set(schedule.id, counters.join("."));
+      }
+      return wbsNumberByScheduleId;
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。collapsedScheduleIds は
+    //   折りたたまれているスケジュールidの集合（Set）。
+    // 【処理】折りたたまれた行の子孫を、深さ優先順の性質を使って除外する（折りたたまれた行
+    //   自身より深いdepthLevelが続く間はスキップし、同じか浅いdepthLevelに戻ったら解除する）。
+    // 【結果】実際に画面へ表示すべき行だけの配列を返す（WBS番号は事前に計算済みのものを使う
+    //   前提のため、この関数はdepthLevel/hasChildren等をそのまま維持する）。
+    function filterVisibleScheduleTreeRows(scheduleTreeRows, collapsedScheduleIds) {
+      const visibleRows = [];
+      let collapsedAncestorDepth = null;
+      for (const row of scheduleTreeRows) {
+        if (collapsedAncestorDepth !== null) {
+          if (row.depthLevel > collapsedAncestorDepth) continue;
+          collapsedAncestorDepth = null;
+        }
+        visibleRows.push(row);
+        if (collapsedScheduleIds.has(row.schedule.id)) {
+          collapsedAncestorDepth = row.depthLevel;
         }
       }
-      for (const rootSchedule of rootSchedules) {
-        appendScheduleAndDescendants(rootSchedule, 0);
-      }
-      return scheduleTreeRows;
+      return visibleRows;
     }
 
     // 【前提】taskList は同一プロジェクト内のタスク全件。
@@ -1662,6 +1789,20 @@
       const targetTimestamp = parseDateStringToUtcTimestamp(targetDateString);
       const startTimestamp = parseDateStringToUtcTimestamp(timelineStartDateString);
       return Math.round((targetTimestamp - startTimestamp) / MILLISECONDS_PER_DAY);
+    }
+
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。timelineStartDateString は
+    //   タイムライン先頭日。todayDateString は基準日（"YYYY-MM-DD"）。呼び出し元（refreshGanttPanel）が
+    //   `new Date()`から求めて渡す。この関数自体はnew Date()を呼ばない（固定値を渡してテストできる
+    //   ようにするため。純粋関数として保つ設計判断）。
+    // 【処理】基準日がタイムライン表示範囲内にあるかを判定し、範囲内ならx座標(px)を計算する。
+    // 【結果】範囲内ならleftPx（数値）、範囲外（表示中のプロジェクト期間の外）ならnullを返す。
+    function calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString) {
+      const dayOffset = calculateDayOffsetFromTimelineStart(todayDateString, timelineStartDateString);
+      if (dayOffset < 0 || dayOffset >= timelineDays.length) {
+        return null;
+      }
+      return dayOffset * pixelsPerDay;
     }
 
     // 【前提】schedule.startDate/endDateのどちらかが未設定の場合、バーは描画できない
@@ -1734,33 +1875,61 @@
         .join("");
     }
 
-    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。visibleColumns は
-    //   {startDate, endDate, status} の表示可否。基本設計書2.2節の固定順（開始→終了→状態）で
-    //   右側から列を追加する。
-    // 【処理】WBSパネル（スケジュール名列＋トグルされた追加列）のHTML文字列を組み立てる。
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値（折りたたみ状態に関係なく
+    //   常に全件）。visibleColumns は {startDate, endDate, status} の表示可否
+    //   （基本設計書2.2節の固定順で右側から列を追加）。collapsedScheduleIds は折りたたまれている
+    //   スケジュールidの集合。
+    // 【処理】WBSパネル（番号＋スケジュール名列＋トグルされた追加列＋ホバー操作アイコン）の
+    //   HTML文字列を組み立てる。WBS番号はcalculateWbsNumbersで全件から計算し（折りたたみで
+    //   隠れていても採番自体は変わらないようにするため）、実際に描画する行は
+    //   filterVisibleScheduleTreeRowsで絞り込む。
+    //   各行には開閉（子を持つ行のみ）／上下矢印（兄弟内の先頭・末尾では無効化）／
+    //   子スケジュール追加（孫＝3階層目では無効化）／編集／削除のアイコンを常にDOM上には
+    //   持たせ、CSSの:hoverで表示・非表示を切り替える（一覧仕様「ホバー時のみうっすら表示」）。
     // 【結果】wbsPanel要素のinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns) {
+    function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns, collapsedScheduleIds) {
       const headerExtraColumnsHtml = [
         visibleColumns.startDate ? '<div class="wbs-column-extra">開始日</div>' : "",
         visibleColumns.endDate ? '<div class="wbs-column-extra">終了日</div>' : "",
         visibleColumns.status ? '<div class="wbs-column-extra">状態</div>' : "",
       ].join("");
-      const headerHtml = `<div class="wbs-header-row"><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}</div>`;
+      const headerHtml = `<div class="wbs-header-row"><div class="wbs-row-icons"></div><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}</div>`;
 
       if (scheduleTreeRows.length === 0) {
         return headerHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
       }
 
-      const rowsHtml = scheduleTreeRows
-        .map(({ schedule, depthLevel }) => {
-          const indentedName = "　".repeat(depthLevel) + escapeHtmlText(schedule.name);
+      const wbsNumberByScheduleId = calculateWbsNumbers(scheduleTreeRows);
+      const visibleRows = filterVisibleScheduleTreeRows(scheduleTreeRows, collapsedScheduleIds);
+
+      const rowsHtml = visibleRows
+        .map(({ schedule, depthLevel, hasChildren, siblingIndex, siblingCount }) => {
+          const wbsNumber = wbsNumberByScheduleId.get(schedule.id);
+          const indentedName = "　".repeat(depthLevel) + escapeHtmlText(wbsNumber) + " " + escapeHtmlText(schedule.name);
           const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
           const extraColumnsHtml = [
             visibleColumns.startDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.startDate)}</div>` : "",
             visibleColumns.endDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.endDate)}</div>` : "",
             visibleColumns.status ? `<div class="wbs-column-extra">${escapeHtmlText(statusLabel)}</div>` : "",
           ].join("");
-          return `<div class="wbs-row" data-schedule-id="${escapeHtmlText(schedule.id)}"><div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
+
+          const isCollapsed = collapsedScheduleIds.has(schedule.id);
+          const toggleIconHtml = hasChildren
+            ? `<button type="button" class="wbs-icon-button" data-action="toggle-collapse" title="開閉">${isCollapsed ? "▸" : "▾"}</button>`
+            : '<span class="wbs-icon-spacer"></span>';
+          const isFirstInGroup = siblingIndex === 0;
+          const isLastInGroup = siblingIndex === siblingCount - 1;
+          const canAddChild = depthLevel < MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN;
+          const iconsHtml = `<div class="wbs-row-icons">
+            ${toggleIconHtml}
+            <button type="button" class="wbs-icon-button" data-action="move-up" ${isFirstInGroup ? "disabled" : ""} title="上へ移動">↑</button>
+            <button type="button" class="wbs-icon-button" data-action="move-down" ${isLastInGroup ? "disabled" : ""} title="下へ移動">↓</button>
+            <button type="button" class="wbs-icon-button" data-action="add-child" ${canAddChild ? "" : "disabled"} title="子スケジュール追加">＋</button>
+            <button type="button" class="wbs-icon-button" data-action="edit" title="編集">✎</button>
+            <button type="button" class="wbs-icon-button" data-action="delete" title="削除">🗑</button>
+          </div>`;
+
+          return `<div class="wbs-row" data-schedule-id="${escapeHtmlText(schedule.id)}">${iconsHtml}<div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
         })
         .join("");
       return headerHtml + rowsHtml;
@@ -1907,18 +2076,28 @@
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
-    //   buildGanttTimelineDays の戻り値。milestones は project.milestones。
+    //   buildGanttTimelineDays の戻り値。milestones は project.milestones。todayDateString は
+    //   基準日（"YYYY-MM-DD"）。呼び出し元がnew Date()から求めて渡す（純粋関数として保つため）。
     // 【処理】列の背景（「日」表示は土日の色分け、それ以外の粒度は縞模様）、行の背景、バー
     //   （親行は太め・中央配置、葉行は細め・行の65%位置、完了ステータスは半透明）、
-    //   マイルストーンの縦線＋ひし形マーカーをすべて絶対配置のdivとして組み立てる
-    //   （UIデザイン仕様書3章の視覚仕様に準拠）。
+    //   マイルストーンの縦線＋ひし形マーカー、今日を示す縦のハイライト線をすべて絶対配置の
+    //   divとして組み立てる（UIデザイン仕様書3章の視覚仕様に準拠）。
     // 【設計判断：スケジュール0件でも列は必ずプロジェクト全期間ぶん描画する】
     //   以前は「0件なら本体を描画せずメッセージのみ」としていたため、列（背景の縞模様）自体が
     //   全く生成されない不具合があった。列の生成（periodColumnsHtml）と行の生成
     //   （rowBackgroundsHtml・barsHtml、0件なら単に空文字列になるだけ）を分離し、
     //   0件時は「空状態メッセージを上に重ねて表示するが、列は最後まで描画されている」形にする。
+    // 【設計判断：グリッド背景（列の色帯）・マイルストーン線・今日マーカーの高さを
+    //   実データ行数に縛られないようにする】
+    //   これら3種類の縦の要素は、CSS側で`top:0;bottom:0`にして「親要素(.gantt-body)の
+    //   実際の高さいっぱいに伸びる」設計にする（pxで高さを指定しない）。.gantt-body自体の
+    //   高さを「実データ行数ぶん」と「画面の表示領域の高さ」のどちらか大きい方にすれば
+    //   （後述のtotalHeightPx／CSS変数--gantt-body-min-heightのmax()）、この3種類は
+    //   自動的にその高さまで届く。逆に、以前のようにこれらの要素へ個別にpx単位の高さを
+    //   指定してしまうと、指定した値がCSSのtop/bottom挙動より優先されてしまい、
+    //   実データ行数分の高さで頭打ちになる（今回の不具合の原因）。
     // 【結果】gantt-bodyのHTML文字列を返す。
-    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
+    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       const totalWidthPx = timelineDays.length * pixelsPerDay;
       const totalHeightPx = Math.max(scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX, GANTT_ROW_HEIGHT_PX);
 
@@ -1962,29 +2141,39 @@
         })
         .join("");
 
+      // 【前提】マイルストーン線・今日マーカーはどちらも「left位置だけ決めて、高さは
+      //   CSSのtop:0;bottom:0に任せる」ため、ここでは高さ(height)を指定しない。
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
         .map(
           (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px;height:${totalHeightPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
+            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
         )
         .join("");
+
+      const todayMarkerLeftPx = calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString);
+      const todayMarkerHtml =
+        todayMarkerLeftPx === null ? "" : `<div class="gantt-today-marker" style="left:${todayMarkerLeftPx}px" title="今日"></div>`;
 
       const emptyMessageHtml =
         scheduleTreeRows.length === 0 ? '<p class="empty-state-message gantt-empty-overlay">スケジュールがありません。</p>' : "";
 
-      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${emptyMessageHtml}</div>`;
+      // 【設計判断：.gantt-bodyの高さは「実データ行数」と「画面の表示領域の高さ」の
+      //   大きい方にする】CSSのmax()を使い、実データが画面より多ければ実データの高さ
+      //   （＝縦スクロールが発生する）、少なければ画面の表示領域の下端まで
+      //   （--gantt-body-min-height、:root定義）を採用する。
+      return `<div class="gantt-body" style="width:${totalWidthPx}px;min-height:max(${totalHeightPx}px, var(--gantt-body-min-height))">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${todayMarkerHtml}${emptyMessageHtml}</div>`;
     }
 
     // 【前提】scheduleTreeRows・timelineDays・milestonesは上記各関数の戻り値・入力と同じ。
-    //   granularityは表示粒度。
+    //   granularityは表示粒度。todayDateStringは基準日（呼び出し元がnew Date()から求めて渡す）。
     // 【処理】タイムラインヘッダーとガント本体を連結する（ガントパネル全体の組み立て窓口）。
     //   スケジュールが0件でも、ヘッダー・本体とも必ずプロジェクト全期間ぶんの列を描画する
     //   （0件用の早期returnは行わない。今回修正した不具合の要点）。
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
+    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       return (
         renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) +
-        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity)
+        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString)
       );
     }
 
@@ -2101,10 +2290,37 @@
       applyProjectSelectOptions(renderProjectOptionsToHtml(projectList, currentSelectedProjectId));
     }
 
+    // 【前提】currentProjectObject・currentScheduleTreeRowsが設定済みであること。
+    // 【処理】DBへ再度問い合わせず、キャッシュ済みcurrentScheduleTreeRowsと現在の折りたたみ・
+    //   列表示・表示粒度の状態だけを使って、WBSパネル・ガント本体の両方を再描画する。
+    //   行の折りたたみ切替のように「DBの中身は変わっていないが見た目の状態だけ変わった」
+    //   場面で使う（DB再取得を伴うrefreshGanttPanelと役割を分ける）。
+    // 【結果】WBS・ガント両パネルの表示が、現在のキャッシュ・状態を反映したものに更新される。
+    function rerenderWbsAndGanttFromCache() {
+      const visibleScheduleTreeRows = filterVisibleScheduleTreeRows(currentScheduleTreeRows, collapsedScheduleIds);
+      const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
+      const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns, collapsedScheduleIds));
+      applyGanttPanel(
+        renderGanttChartToHtml(
+          visibleScheduleTreeRows,
+          timelineDays,
+          pixelsPerDay,
+          currentProjectObject.milestones,
+          currentProjectObject.startDate,
+          currentGranularity,
+          todayDateString
+        )
+      );
+    }
+
     // 【前提】projectId はnull、または実在するプロジェクトのid。currentProjectObjectが
     //   switchToProjectで設定済みであること（プロジェクトのstartDate/endDate/milestonesを使うため）。
     // 【処理】projectIdがnullなら空状態を表示し、そうでなければgetSchedulesByProjectで取得して
-    //   ツリー化し、WBSパネルとガント本体（タイムライン＋バー）の両方を再描画する。
+    //   ツリー化し（currentScheduleTreeRowsは常に「折りたたみに関係ない全件」を保持する。
+    //   WBS番号の計算・兄弟位置の判定は隠れている行も含めた全体構造が必要なため）、
+    //   rerenderWbsAndGanttFromCacheで両パネルを再描画する。
     // 【結果】WBS・ガント両パネルの表示が最新の状態に更新される。
     async function refreshGanttPanel(projectId) {
       if (!projectId || !currentProjectObject) {
@@ -2115,19 +2331,7 @@
       const scheduleList = await getSchedulesByProject(projectId);
       currentScheduleTreeRows = buildScheduleTreeRows(scheduleList);
       currentTimelineStartDateString = currentProjectObject.startDate;
-      const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
-      const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
-      applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
-      applyGanttPanel(
-        renderGanttChartToHtml(
-          currentScheduleTreeRows,
-          timelineDays,
-          pixelsPerDay,
-          currentProjectObject.milestones,
-          currentProjectObject.startDate,
-          currentGranularity
-        )
-      );
+      rerenderWbsAndGanttFromCache();
     }
 
     // refreshGanttPanelと同じ考え方。対象はtasks・カンバンボード。
@@ -2388,12 +2592,14 @@
     }
 
     // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
+    //   presetParentId は新規作成時にあらかじめ決めておく親id（ルート作成ならnull、
+    //   子スケジュール追加ボタンから開く場合はそのスケジュールのid）。編集時は使わない。
     // 【処理】スケジュールモーダルを開き、キャンセル・保存・カラーパレットの選択にイベントを登録する。
     // 【結果】モーダルが操作可能な状態で表示される。
-    function openScheduleModal(existingSchedule, hasChildren) {
+    function openScheduleModal(existingSchedule, hasChildren, presetParentId) {
       openModal(renderScheduleModalToHtml(existingSchedule, hasChildren));
       document.getElementById("scheduleModalCancelButton").addEventListener("click", closeModal);
-      document.getElementById("scheduleModalSaveButton").addEventListener("click", () => handleScheduleModalSaveButtonClick(existingSchedule));
+      document.getElementById("scheduleModalSaveButton").addEventListener("click", () => handleScheduleModalSaveButtonClick(existingSchedule, presetParentId));
       for (const swatch of document.querySelectorAll(".modal-color-swatch")) {
         swatch.addEventListener("click", () => {
           for (const otherSwatch of document.querySelectorAll(".modal-color-swatch")) {
@@ -2409,7 +2615,23 @@
         window.alert("先にプロジェクトを選択してください。");
         return;
       }
-      openScheduleModal(null, false);
+      openScheduleModal(null, false, null);
+    }
+
+    // 【前提】parentScheduleId は子を追加したい親スケジュールのid（currentScheduleTreeRowsに
+    //   含まれること）。呼び出し元（WBS行の＋ボタン）は、depthLevelが
+    //   MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN未満の行にしかこのボタンを出さないため、
+    //   通常はここに到達する時点で3階層制約は満たされている。
+    // 【処理】親をpresetParentIdとして固定した新規作成モーダルを開く（基本設計書4.1節：
+    //   親→子→孫の3階層まで作成可能）。
+    // 【結果】子スケジュール作成モーダルが表示される。
+    function handleAddChildScheduleButtonClick(parentScheduleId) {
+      const parentRow = currentScheduleTreeRows.find((row) => row.schedule.id === parentScheduleId);
+      if (!parentRow || parentRow.depthLevel >= MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN) {
+        window.alert("これ以上深い階層のスケジュールは作成できません（親→子→孫の3階層まで）。");
+        return;
+      }
+      openScheduleModal(null, false, parentScheduleId);
     }
 
     // 【前提】scheduleId は編集したいスケジュールの id（currentScheduleTreeRowsに含まれること）。
@@ -2419,7 +2641,7 @@
     function handleWbsRowClick(scheduleId) {
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
       if (!targetRow) return;
-      openScheduleModal(targetRow.schedule, targetRow.hasChildren);
+      openScheduleModal(targetRow.schedule, targetRow.hasChildren, null);
     }
 
     // 【前提】input は {name, startDate, endDate, hasChildren}（スケジュールモーダルの入力値）。
@@ -2435,14 +2657,16 @@
     }
 
     // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
+    //   presetParentId は新規作成時の親id（ルート作成ならnull、子スケジュール追加なら
+    //   そのスケジュールのid）。existingSchedule有り（編集）の場合は無視する
+    //   （編集では親を変更する機能を持たせないため）。
     // 【処理】モーダル内の入力値を読み取り、validateScheduleModalInputでバリデーションし、
     //   OKならaddScheduleで保存する。子を持つ行は開始日・終了日を既存値のまま維持する
     //   （手入力欄は読み取り専用にしているため）。
     //   新規作成後、親を持つ場合はsyncAncestorDatesで祖先の日付を再計算する
-    //   （手入力ではなく子の日付から自動計算される仕様のため、親行を直接作る動線は無いが、
-    //   将来の階層編集機能のために呼び出しておく）。
+    //   （子を追加すると親の期間が変わりうるため。基本設計書4.3節）。
     // 【結果】保存成功時はモーダルを閉じ、ガントパネルを更新する。
-    async function handleScheduleModalSaveButtonClick(existingSchedule) {
+    async function handleScheduleModalSaveButtonClick(existingSchedule, presetParentId) {
       const name = document.getElementById("scheduleModalNameInput").value.trim();
       const assignee = document.getElementById("scheduleModalAssigneeInput").value.trim();
       const taskStatus = document.getElementById("scheduleModalStatusSelect").value;
@@ -2471,7 +2695,7 @@
         : {
             id: generateId(),
             projectId: currentSelectedProjectId,
-            parentId: null,
+            parentId: presetParentId ?? null,
             name,
             startDate,
             endDate,
@@ -2487,6 +2711,86 @@
       }
       closeModal();
       await refreshGanttPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】scheduleId は移動したいスケジュールのid。direction は "up" | "down"。
+    //   呼び出し元（WBS行の上下矢印）は、兄弟内の先頭で"up"・末尾で"down"のボタンを
+    //   無効化しているため、通常はここに到達する時点で境界チェックは満たされている。
+    // 【処理】同じ親を持つ兄弟同士（parentIdが一致するスケジュール）をorder順に並べ、
+    //   指定方向の隣接する兄弟とorder値を入れ替えて保存する（基本設計書4.1節：
+    //   「並び替えは同一階層内でのみ可能」を、parentId一致という条件でそのまま満たす）。
+    // 【結果】隣接する2件のorderが入れ替わり、ガントパネルが再描画される。
+    async function handleMoveScheduleOrderClick(scheduleId, direction) {
+      const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!targetRow) return;
+
+      const siblingSchedules = currentScheduleTreeRows
+        .filter((row) => row.schedule.parentId === targetRow.schedule.parentId)
+        .map((row) => row.schedule)
+        .sort((a, b) => a.order - b.order);
+      const currentIndex = siblingSchedules.findIndex((schedule) => schedule.id === scheduleId);
+      const swapIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (swapIndex < 0 || swapIndex >= siblingSchedules.length) return;
+
+      const currentSchedule = siblingSchedules[currentIndex];
+      const swapSchedule = siblingSchedules[swapIndex];
+      const currentOrder = currentSchedule.order;
+      await addSchedule({ ...currentSchedule, order: swapSchedule.order });
+      await addSchedule({ ...swapSchedule, order: currentOrder });
+      await refreshGanttPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】scheduleId は削除したいスケジュールのid。
+    // 【処理】子の有無でC2（子なし）／C3（子あり・サブタスクごと削除）の確認文言を切り替えて
+    //   confirm()し、OKならdeleteScheduleCascadeで削除する（連鎖削除・コメント削除・
+    //   変更履歴記録・祖先日付再計算は既存の複合操作にすべて任せる）。
+    // 【結果】確認OK時、対象と子孫が削除されガントパネルが再描画される。キャンセル時は何もしない。
+    async function handleDeleteScheduleButtonClick(scheduleId) {
+      const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!targetRow) return;
+      const confirmMessage = targetRow.hasChildren
+        ? `「${targetRow.schedule.name}」とそのサブタスクをすべて削除しますか？`
+        : `「${targetRow.schedule.name}」を削除しますか？`;
+      if (!window.confirm(confirmMessage)) return;
+      await deleteScheduleCascade(scheduleId, currentSelectedProjectId);
+      await refreshGanttPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】action は "toggle-collapse" | "move-up" | "move-down" | "add-child" | "edit" | "delete"。
+    //   scheduleId はアイコンが乗っていたWBS行のスケジュールid。
+    // 【処理】WBS行のホバーアイコン共通のディスパッチャー。開閉トグルはDB再取得不要のため
+    //   rerenderWbsAndGanttFromCacheのみ、それ以外は各専用ハンドラへ委譲する。
+    // 【結果】actionに応じた処理が実行される。
+    async function handleWbsRowIconClick(action, scheduleId) {
+      if (action === "toggle-collapse") {
+        if (collapsedScheduleIds.has(scheduleId)) {
+          collapsedScheduleIds.delete(scheduleId);
+        } else {
+          collapsedScheduleIds.add(scheduleId);
+        }
+        rerenderWbsAndGanttFromCache();
+        return;
+      }
+      if (action === "move-up") {
+        await handleMoveScheduleOrderClick(scheduleId, "up");
+        return;
+      }
+      if (action === "move-down") {
+        await handleMoveScheduleOrderClick(scheduleId, "down");
+        return;
+      }
+      if (action === "add-child") {
+        handleAddChildScheduleButtonClick(scheduleId);
+        return;
+      }
+      if (action === "edit") {
+        handleWbsRowClick(scheduleId);
+        return;
+      }
+      if (action === "delete") {
+        await handleDeleteScheduleButtonClick(scheduleId);
+        return;
+      }
     }
 
     // ===== UI：その他のイベントハンドラ =====
@@ -2596,7 +2900,7 @@
     function handleToggleColumnClick(columnKey, buttonElement) {
       visibleWbsColumns[columnKey] = !visibleWbsColumns[columnKey];
       buttonElement.classList.toggle("is-active", visibleWbsColumns[columnKey]);
-      applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
+      applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns, collapsedScheduleIds));
     }
 
     // 【前提】なし。
@@ -2667,10 +2971,19 @@
       document.getElementById("modalOverlay").addEventListener("click", (event) => {
         if (event.target.id === "modalOverlay") closeModal();
       });
-      // WBSパネルの行クリックでスケジュール編集モーダルを開く（イベント委譲。
-      // wbsPanelの中身はrefreshGanttPanelのたびに丸ごと再生成されるため、個々の行ではなく
-      // 親要素にリスナーを1つだけ持たせる）。
+      // WBSパネルのクリックをイベント委譲でまとめて扱う（wbsPanelの中身はrefreshGanttPanelの
+      // たびに丸ごと再生成されるため、個々の行・アイコンではなく親要素にリスナーを1つだけ持たせる）。
+      // ホバーアイコン（.wbs-icon-button）のクリックを先に判定し、該当すればそちらだけを
+      // 処理してreturnする（アイコンは行の内側にあるため、判定を後回しにすると行クリックの
+      // 編集モーダルも同時に開いてしまう＝二重発火を避けるための順序）。
       document.getElementById("wbsPanel").addEventListener("click", (event) => {
+        const iconButton = event.target.closest(".wbs-icon-button");
+        if (iconButton) {
+          if (iconButton.disabled) return;
+          const iconRow = iconButton.closest(".wbs-row[data-schedule-id]");
+          if (iconRow) handleWbsRowIconClick(iconButton.dataset.action, iconRow.dataset.scheduleId);
+          return;
+        }
         const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
       });
