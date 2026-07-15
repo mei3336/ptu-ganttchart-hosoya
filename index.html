@@ -434,6 +434,108 @@
       padding: 0;
       white-space: nowrap;
     }
+
+    /* ===== モーダル・ダイアログ一覧①：中央モーダル（UIデザイン仕様書2.3節） ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, .5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay[hidden] {
+      display: none;
+    }
+
+    .modal-panel {
+      background: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      padding: 20px;
+      width: 420px;
+      max-width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .modal-panel h2 {
+      margin: 0 0 16px;
+      font-size: 15px;
+      color: var(--color-text-dark);
+    }
+
+    .modal-field {
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .modal-field label {
+      font-size: 12px;
+      color: var(--color-text-mid);
+    }
+
+    .modal-field input[type="text"],
+    .modal-field input[type="date"],
+    .modal-field select,
+    .modal-field textarea {
+      padding: 6px 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .modal-color-palette {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .modal-color-swatch {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+
+    .modal-color-swatch.is-selected {
+      border-color: var(--color-text-dark);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .modal-button-primary {
+      padding: 6px 14px;
+      border-radius: var(--radius-standard);
+      border: 1px solid var(--color-accent);
+      background: var(--color-accent);
+      color: var(--color-white);
+      cursor: pointer;
+    }
+
+    .modal-button-secondary {
+      padding: 6px 14px;
+      border-radius: var(--radius-standard);
+      border: 1px solid var(--color-border-dark);
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      cursor: pointer;
+    }
+
+    .wbs-row[data-schedule-id] {
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -468,7 +570,7 @@
       <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
       <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
       <button class="toolbar-button" type="button" data-out-of-scope-label="マイルストーン管理">マイルストーン</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="プロジェクト編集">編集</button>
+      <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
     <div class="header-group">
       <!-- スナップショット／即時メモ／メモ／コメント／変更履歴はサイドパネル機能のため今回のスコープ外。 -->
@@ -502,6 +604,11 @@
       <div id="mindmapPanelBody"></div>
     </section>
   </main>
+
+  <!-- モーダル・ダイアログ一覧①：中央モーダルの共通の入れ物。中身はopenModal()で差し替える。 -->
+  <div id="modalOverlay" class="modal-overlay" hidden>
+    <div class="modal-panel" id="modalPanel"></div>
+  </div>
 
   <script>
     "use strict";
@@ -1573,7 +1680,7 @@
             visibleColumns.endDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.endDate)}</div>` : "",
             visibleColumns.status ? `<div class="wbs-column-extra">${escapeHtmlText(statusLabel)}</div>` : "",
           ].join("");
-          return `<div class="wbs-row"><div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
+          return `<div class="wbs-row" data-schedule-id="${escapeHtmlText(schedule.id)}"><div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
         })
         .join("");
       return headerHtml + rowsHtml;
@@ -1975,54 +2082,295 @@
       document.getElementById("switchToMindmapButton").classList.toggle("is-active", viewName === "mindmap");
     }
 
-    // ===== UI：イベントハンドラ =====
-    // 【設計判断】prompt()による最小限の入力収集のみを行う（バリデーション・詳細フォームは
-    //   今回のスコープ外）。データが1件も無いと画面が常に空欄のままになるため、各ストアに
-    //   最低限の追加手段だけを用意する。削除UIは今回のスコープ外。
+    // ===== UI：モーダル（モーダル・ダイアログ一覧①：中央モーダル） =====
+    // 【設計判断】M1（新規プロジェクト作成）・M4（スケジュール新規作成・編集）を、
+    // prompt()の連鎖から、UIデザイン仕様書2.3節に沿った中央モーダルへ作り直した。
+    // モーダルの開閉・入れ物（#modalOverlay/#modalPanel）は全モーダル共通で使い回す。
 
-    async function handleCreateProjectButtonClick() {
-      const projectName = window.prompt("プロジェクト名を入力してください");
-      if (!projectName) return;
-      const todayDateString = new Date().toISOString().slice(0, 10);
-      const newProject = {
-        id: generateId(),
-        name: projectName,
-        startDate: todayDateString,
-        endDate: todayDateString,
-        milestones: [],
-        locked: false,
-        createdAt: new Date().toISOString(),
-      };
-      await addProject(newProject);
-      await refreshProjectSelectDropdown();
-      document.getElementById("projectSelectDropdown").value = newProject.id;
-      await switchToProject(newProject.id);
+    // 【前提】contentHtml はモーダルパネルに表示するHTML文字列。
+    // 【処理】共通のモーダルオーバーレイにcontentHtmlを差し込んで表示する。
+    // 【結果】画面中央にモーダルが表示される。
+    function openModal(contentHtml) {
+      document.getElementById("modalPanel").innerHTML = contentHtml;
+      document.getElementById("modalOverlay").hidden = false;
     }
 
-    async function handleAddScheduleButtonClick() {
+    // 【前提】なし。
+    // 【処理】モーダルを閉じ、中身を空にする（次回開いたときに前回の入力値が残らないようにする）。
+    // 【結果】モーダルが非表示になる。
+    function closeModal() {
+      document.getElementById("modalOverlay").hidden = true;
+      document.getElementById("modalPanel").innerHTML = "";
+    }
+
+    const SCHEDULE_BAR_COLOR_PALETTE = ["#2563EB", "#0891B2", "#059669", "#D97706", "#DC2626", "#7C3AED", "#DB2777", "#EA580C", "#16A34A", "#0E7490", "#4B5563"];
+
+    // 【前提】project はnull（新規作成モード）、または既存プロジェクトオブジェクト（編集モード）。
+    // 【処理】M1/M2共通のプロジェクトモーダルのHTML文字列を組み立てる（DOMには触れない）。
+    //   新規作成時は開始日・終了日の既定値を今日にする（モーダル・ダイアログ一覧M1）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderProjectModalToHtml(project) {
+      const isEditMode = Boolean(project);
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      const nameValue = isEditMode ? project.name : "";
+      const startDateValue = isEditMode ? project.startDate : todayDateString;
+      const endDateValue = isEditMode ? project.endDate : todayDateString;
+      return `
+        <h2>${isEditMode ? "プロジェクト編集" : "新規プロジェクト作成"}</h2>
+        <div class="modal-field">
+          <label for="projectModalNameInput">プロジェクト名</label>
+          <input type="text" id="projectModalNameInput" value="${escapeHtmlText(nameValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="projectModalStartDateInput">開始日</label>
+          <input type="date" id="projectModalStartDateInput" value="${escapeHtmlText(startDateValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="projectModalEndDateInput">終了日</label>
+          <input type="date" id="projectModalEndDateInput" value="${escapeHtmlText(endDateValue)}">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="projectModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="projectModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】existingProject はnull（新規作成）または既存プロジェクトオブジェクト（編集）。
+    // 【処理】プロジェクトモーダルを開き、キャンセル・保存ボタンにイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openProjectModal(existingProject) {
+      openModal(renderProjectModalToHtml(existingProject));
+      document.getElementById("projectModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("projectModalSaveButton").addEventListener("click", () => handleProjectModalSaveButtonClick(existingProject));
+    }
+
+    function handleCreateProjectButtonClick() {
+      openProjectModal(null);
+    }
+
+    function handleEditProjectButtonClick() {
+      if (!currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      openProjectModal(currentProjectObject);
+    }
+
+    // 3年後の判定はうるう年を厳密に数えず、365日×3年分の日数で近似する（実務上十分な簡略化）。
+    const THREE_YEARS_IN_MILLISECONDS = 3 * 365 * MILLISECONDS_PER_DAY;
+
+    // 【前提】input は {name, startDate, endDate}（プロジェクトモーダルの入力値）。
+    // 【処理】モーダル・ダイアログ一覧A1〜A4のバリデーションを順に判定する（DOMには触れない）。
+    //   ※A3はプロジェクト側が`<=`判定（終了日=開始日も拒否）で、スケジュール側（A7）の
+    //   `<`判定とは非対称。これは基本設計書1.3節No.1の既知の非整合として忠実再現する。
+    // 【結果】エラーがあればそのアラート文言（string）を、無ければnullを返す。
+    function validateProjectModalInput(input) {
+      if (!input.name) return "プロジェクト名を入力してください";
+      if (!input.startDate || !input.endDate) return "日付を入力してください";
+      if (input.endDate <= input.startDate) return "終了日は開始日より後にしてください";
+      if (parseDateStringToUtcTimestamp(input.endDate) - parseDateStringToUtcTimestamp(input.startDate) > THREE_YEARS_IN_MILLISECONDS) {
+        return "期間は最大3年です";
+      }
+      return null;
+    }
+
+    // 【前提】existingProject はnull（新規作成）または既存プロジェクトオブジェクト（編集）。
+    // 【処理】モーダル内の入力値を読み取り、validateProjectModalInputでバリデーションし、
+    //   OKならaddProjectで保存してモーダルを閉じ、画面を更新する。
+    // 【結果】保存成功時はモーダルを閉じ、プロジェクト一覧・選択状態を更新する。
+    async function handleProjectModalSaveButtonClick(existingProject) {
+      const name = document.getElementById("projectModalNameInput").value.trim();
+      const startDate = document.getElementById("projectModalStartDateInput").value;
+      const endDate = document.getElementById("projectModalEndDateInput").value;
+
+      const validationError = validateProjectModalInput({ name, startDate, endDate });
+      if (validationError) {
+        window.alert(validationError);
+        return;
+      }
+
+      const projectToSave = existingProject
+        ? { ...existingProject, name, startDate, endDate }
+        : { id: generateId(), name, startDate, endDate, milestones: [], locked: false, createdAt: new Date().toISOString() };
+      await addProject(projectToSave);
+      closeModal();
+      await refreshProjectSelectDropdown();
+      document.getElementById("projectSelectDropdown").value = projectToSave.id;
+      await switchToProject(projectToSave.id);
+    }
+
+    // 【前提】schedule はnull（新規作成モード）、または既存スケジュールオブジェクト（編集モード）。
+    //   hasChildren は編集対象が子を持つか（子を持つ場合、開始日・終了日は自動計算のため
+    //   読み取り専用にする。基本設計書4.2節）。
+    // 【処理】M4（スケジュール新規作成・編集）モーダルのHTML文字列を組み立てる。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderScheduleModalToHtml(schedule, hasChildren) {
+      const isEditMode = Boolean(schedule);
+      const nameValue = isEditMode ? schedule.name : "";
+      const startDateValue = isEditMode ? schedule.startDate : "";
+      const endDateValue = isEditMode ? schedule.endDate : "";
+      const assigneeValue = isEditMode ? schedule.assignee : "";
+      const taskStatusValue = isEditMode ? schedule.taskStatus : "todo";
+      const notesValue = isEditMode ? schedule.notes : "";
+      const selectedColor = isEditMode && schedule.color ? schedule.color : SCHEDULE_BAR_COLOR_PALETTE[0];
+      const dateDisabledAttribute = hasChildren ? "disabled" : "";
+      const dateHintHtml = hasChildren
+        ? '<p class="empty-state-message" style="padding:0;font-size:11px;">子タスクから自動計算されます</p>'
+        : "";
+
+      const statusOptionsHtml = Object.entries(SCHEDULE_STATUS_LABELS)
+        .map(([value, label]) => `<option value="${value}"${value === taskStatusValue ? " selected" : ""}>${label}</option>`)
+        .join("");
+
+      const colorSwatchesHtml = SCHEDULE_BAR_COLOR_PALETTE
+        .map((color) => `<div class="modal-color-swatch${color === selectedColor ? " is-selected" : ""}" data-color="${color}" style="background:${color}"></div>`)
+        .join("");
+
+      return `
+        <h2>${isEditMode ? "スケジュール編集" : "スケジュール新規作成"}</h2>
+        <div class="modal-field">
+          <label for="scheduleModalNameInput">スケジュール名</label>
+          <input type="text" id="scheduleModalNameInput" value="${escapeHtmlText(nameValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalStartDateInput">開始日</label>
+          <input type="date" id="scheduleModalStartDateInput" value="${escapeHtmlText(startDateValue)}" ${dateDisabledAttribute}>
+          ${dateHintHtml}
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalEndDateInput">終了日</label>
+          <input type="date" id="scheduleModalEndDateInput" value="${escapeHtmlText(endDateValue)}" ${dateDisabledAttribute}>
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalAssigneeInput">担当者</label>
+          <input type="text" id="scheduleModalAssigneeInput" value="${escapeHtmlText(assigneeValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalStatusSelect">ステータス</label>
+          <select id="scheduleModalStatusSelect">${statusOptionsHtml}</select>
+        </div>
+        <div class="modal-field">
+          <label>カラー</label>
+          <div class="modal-color-palette" id="scheduleModalColorPalette">${colorSwatchesHtml}</div>
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalNotesTextarea">メモ</label>
+          <textarea id="scheduleModalNotesTextarea" rows="3">${escapeHtmlText(notesValue)}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="scheduleModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="scheduleModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
+    // 【処理】スケジュールモーダルを開き、キャンセル・保存・カラーパレットの選択にイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openScheduleModal(existingSchedule, hasChildren) {
+      openModal(renderScheduleModalToHtml(existingSchedule, hasChildren));
+      document.getElementById("scheduleModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("scheduleModalSaveButton").addEventListener("click", () => handleScheduleModalSaveButtonClick(existingSchedule));
+      for (const swatch of document.querySelectorAll(".modal-color-swatch")) {
+        swatch.addEventListener("click", () => {
+          for (const otherSwatch of document.querySelectorAll(".modal-color-swatch")) {
+            otherSwatch.classList.remove("is-selected");
+          }
+          swatch.classList.add("is-selected");
+        });
+      }
+    }
+
+    function handleAddScheduleButtonClick() {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
         return;
       }
-      const scheduleName = window.prompt("スケジュール名を入力してください");
-      if (!scheduleName) return;
-      const scheduleStartDate = window.prompt("開始日を入力してください（YYYY-MM-DD）", currentProjectObject?.startDate || "");
-      const scheduleEndDate = window.prompt("終了日を入力してください（YYYY-MM-DD）", scheduleStartDate || "");
-      await addSchedule({
-        id: generateId(),
-        projectId: currentSelectedProjectId,
-        parentId: null,
-        name: scheduleName,
-        startDate: scheduleStartDate || "",
-        endDate: scheduleEndDate || "",
-        assignee: "",
-        taskStatus: "todo",
-        notes: "",
-        color: "#2563EB",
-        order: currentScheduleTreeRows.length,
-      });
+      openScheduleModal(null, false);
+    }
+
+    // 【前提】scheduleId は編集したいスケジュールの id（currentScheduleTreeRowsに含まれること）。
+    // 【処理】WBSパネルの行クリックから呼ばれ、該当スケジュールの編集モーダルを開く
+    //   （モーダル・ダイアログ一覧M4：ガント上の行クリックで編集）。
+    // 【結果】編集モーダルが表示される。
+    function handleWbsRowClick(scheduleId) {
+      const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!targetRow) return;
+      openScheduleModal(targetRow.schedule, targetRow.hasChildren);
+    }
+
+    // 【前提】input は {name, startDate, endDate, hasChildren}（スケジュールモーダルの入力値）。
+    //   子を持つ行は開始日・終了日が自動計算のため、日付のバリデーション自体を行わない。
+    // 【処理】モーダル・ダイアログ一覧A5〜A7のバリデーションを順に判定する（DOMには触れない）。
+    // 【結果】エラーがあればそのアラート文言（string）を、無ければnullを返す。
+    function validateScheduleModalInput(input) {
+      if (!input.name) return "スケジュールを入力してください";
+      if (input.hasChildren) return null;
+      if (!input.startDate || !input.endDate) return "日付を入力してください";
+      if (input.endDate < input.startDate) return "終了日は開始日以降にしてください";
+      return null;
+    }
+
+    // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
+    // 【処理】モーダル内の入力値を読み取り、validateScheduleModalInputでバリデーションし、
+    //   OKならaddScheduleで保存する。子を持つ行は開始日・終了日を既存値のまま維持する
+    //   （手入力欄は読み取り専用にしているため）。
+    //   新規作成後、親を持つ場合はsyncAncestorDatesで祖先の日付を再計算する
+    //   （手入力ではなく子の日付から自動計算される仕様のため、親行を直接作る動線は無いが、
+    //   将来の階層編集機能のために呼び出しておく）。
+    // 【結果】保存成功時はモーダルを閉じ、ガントパネルを更新する。
+    async function handleScheduleModalSaveButtonClick(existingSchedule) {
+      const name = document.getElementById("scheduleModalNameInput").value.trim();
+      const assignee = document.getElementById("scheduleModalAssigneeInput").value.trim();
+      const taskStatus = document.getElementById("scheduleModalStatusSelect").value;
+      const notes = document.getElementById("scheduleModalNotesTextarea").value;
+      const selectedSwatch = document.querySelector(".modal-color-swatch.is-selected");
+      const color = selectedSwatch ? selectedSwatch.dataset.color : SCHEDULE_BAR_COLOR_PALETTE[0];
+
+      const existingRow = existingSchedule ? currentScheduleTreeRows.find((row) => row.schedule.id === existingSchedule.id) : null;
+      const hasChildren = Boolean(existingRow?.hasChildren);
+
+      let startDate = existingSchedule ? existingSchedule.startDate : "";
+      let endDate = existingSchedule ? existingSchedule.endDate : "";
+      if (!hasChildren) {
+        startDate = document.getElementById("scheduleModalStartDateInput").value;
+        endDate = document.getElementById("scheduleModalEndDateInput").value;
+      }
+
+      const validationError = validateScheduleModalInput({ name, startDate, endDate, hasChildren });
+      if (validationError) {
+        window.alert(validationError);
+        return;
+      }
+
+      const scheduleToSave = existingSchedule
+        ? { ...existingSchedule, name, startDate, endDate, assignee, taskStatus, notes, color }
+        : {
+            id: generateId(),
+            projectId: currentSelectedProjectId,
+            parentId: null,
+            name,
+            startDate,
+            endDate,
+            assignee,
+            taskStatus,
+            notes,
+            color,
+            order: currentScheduleTreeRows.length,
+          };
+      await addSchedule(scheduleToSave);
+      if (scheduleToSave.parentId !== null && scheduleToSave.parentId !== undefined) {
+        await syncAncestorDates(scheduleToSave.parentId);
+      }
+      closeModal();
       await refreshGanttPanel(currentSelectedProjectId);
     }
+
+    // ===== UI：その他のイベントハンドラ =====
+    // 【設計判断】M1/M4はモーダル化したが、tasks/issuesの追加は今回スコープの手前で
+    //   prompt()ベースの最小限のまま据え置く（P1のスライドパネル化に伴い、taskの追加は
+    //   パネル内埋め込みフォームに変わるため、ここでは変更しない）。
 
     async function handleAddTaskButtonClick() {
       if (!currentSelectedProjectId) {
@@ -2167,6 +2515,19 @@
       for (const outOfScopeButton of document.querySelectorAll("[data-out-of-scope-label]")) {
         outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
       }
+      document.getElementById("editProjectButton").addEventListener("click", handleEditProjectButtonClick);
+      // モーダル外側（オーバーレイ自身）をクリックしたときだけ閉じる
+      // （モーダル・ダイアログ一覧2.3節：「モーダル外側をクリックすると閉じる」）。
+      document.getElementById("modalOverlay").addEventListener("click", (event) => {
+        if (event.target.id === "modalOverlay") closeModal();
+      });
+      // WBSパネルの行クリックでスケジュール編集モーダルを開く（イベント委譲。
+      // wbsPanelの中身はrefreshGanttPanelのたびに丸ごと再生成されるため、個々の行ではなく
+      // 親要素にリスナーを1つだけ持たせる）。
+      document.getElementById("wbsPanel").addEventListener("click", (event) => {
+        const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
+        if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
+      });
 
       const projectList = await getAllProjects();
       await refreshProjectSelectDropdown();
