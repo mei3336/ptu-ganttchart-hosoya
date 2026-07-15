@@ -688,6 +688,28 @@
       border-color: var(--color-text-dark);
     }
 
+    /* M4：スケジュール編集モーダル内のコメント欄（既存スケジュールのみ表示） */
+    .modal-comment-list {
+      max-height: 160px;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      margin-bottom: 8px;
+    }
+
+    .modal-comment-list .panel-list-item {
+      padding: 6px 10px;
+    }
+
+    .modal-comment-post-form {
+      display: flex;
+      gap: 8px;
+    }
+
+    .modal-comment-post-form input {
+      flex: 1;
+    }
+
     .modal-actions {
       display: flex;
       justify-content: flex-end;
@@ -3458,7 +3480,41 @@
     //   読み取り専用にする。基本設計書4.2節）。
     // 【処理】M4（スケジュール新規作成・編集）モーダルのHTML文字列を組み立てる。
     // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
-    function renderScheduleModalToHtml(schedule, hasChildren) {
+    // 【前提】comments は対象スケジュールに紐づくコメント全件（無ければ空配列）。
+    // 【処理】投稿日時の昇順（古い順）に並べ、各コメントに削除ボタンを添えた一覧と、
+    //   末尾に投稿フォームを組み立てる（モーダル・ダイアログ一覧M4：コメントは
+    //   既存スケジュールの編集モーダル内に埋め込む仕様）。
+    // 【結果】コメント欄のHTML文字列を返す。
+    function renderModalCommentSectionToHtml(comments) {
+      const sortedComments = comments.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const commentListHtml = sortedComments.length > 0
+        ? sortedComments
+            .map(
+              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+                <div class="panel-list-item-main">
+                  <div>${escapeHtmlText(comment.text)}</div>
+                  <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
+                </div>
+                <div class="panel-list-item-actions">
+                  <button type="button" class="wbs-icon-button" data-action="delete-modal-comment" title="削除">🗑</button>
+                </div>
+              </div>`
+            )
+            .join("")
+        : '<p class="empty-state-message">コメントはまだありません。</p>';
+      return `
+        <div class="modal-field">
+          <label>コメント</label>
+          <div class="modal-comment-list">${commentListHtml}</div>
+          <div class="modal-comment-post-form">
+            <input type="text" id="scheduleModalCommentTextInput" placeholder="コメントを入力">
+            <button type="button" class="panel-add-button" id="scheduleModalPostCommentButton">投稿</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderScheduleModalToHtml(schedule, hasChildren, comments) {
       const isEditMode = Boolean(schedule);
       // カレンダー系入力の初期値は「今日」にする（ユーザー指示）。編集時は既存値をそのまま使う。
       const todayDateString = new Date().toISOString().slice(0, 10);
@@ -3513,6 +3569,7 @@
           <label for="scheduleModalNotesTextarea">メモ</label>
           <textarea id="scheduleModalNotesTextarea" rows="3">${escapeHtmlText(notesValue)}</textarea>
         </div>
+        ${isEditMode ? renderModalCommentSectionToHtml(comments) : ""}
         <div class="modal-actions">
           <button type="button" class="modal-button-secondary" id="scheduleModalCancelButton">キャンセル</button>
           <button type="button" class="modal-button-primary" id="scheduleModalSaveButton">保存</button>
@@ -3523,10 +3580,14 @@
     // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
     //   presetParentId は新規作成時にあらかじめ決めておく親id（ルート作成ならnull、
     //   子スケジュール追加ボタンから開く場合はそのスケジュールのid）。編集時は使わない。
-    // 【処理】スケジュールモーダルを開き、キャンセル・保存・カラーパレットの選択にイベントを登録する。
+    // 【処理】既存スケジュールの場合のみgetCommentsByTaskでコメントを取得してから
+    //   モーダルを開き、キャンセル・保存・カラーパレット・コメント投稿/削除の
+    //   イベントを登録する（コメント欄はモーダルの再描画のたびに新しいDOM要素になるため、
+    //   カラースワッチと同じく直接addEventListenerしてよい＝二重登録の心配はない）。
     // 【結果】モーダルが操作可能な状態で表示される。
-    function openScheduleModal(existingSchedule, hasChildren, presetParentId) {
-      openModal(renderScheduleModalToHtml(existingSchedule, hasChildren));
+    async function openScheduleModal(existingSchedule, hasChildren, presetParentId) {
+      const comments = existingSchedule ? await getCommentsByTask(existingSchedule.id) : [];
+      openModal(renderScheduleModalToHtml(existingSchedule, hasChildren, comments));
       document.getElementById("scheduleModalCancelButton").addEventListener("click", closeModal);
       document.getElementById("scheduleModalSaveButton").addEventListener("click", () => handleScheduleModalSaveButtonClick(existingSchedule, presetParentId));
       for (const swatch of document.querySelectorAll(".modal-color-swatch")) {
@@ -3537,6 +3598,34 @@
           swatch.classList.add("is-selected");
         });
       }
+      if (existingSchedule) {
+        document.getElementById("scheduleModalPostCommentButton").addEventListener("click", () => handlePostModalCommentButtonClick(existingSchedule, hasChildren));
+        for (const deleteButton of document.querySelectorAll('[data-action="delete-modal-comment"]')) {
+          const commentId = deleteButton.closest("[data-comment-id]").dataset.commentId;
+          deleteButton.addEventListener("click", () => handleDeleteModalCommentButtonClick(commentId, existingSchedule, hasChildren));
+        }
+      }
+    }
+
+    // 【前提】schedule は編集中のスケジュール（コメント欄はこの場合のみ表示される）。
+    //   hasChildren はそのスケジュールが子を持つか（モーダル再描画時に必要な情報）。
+    // 【処理】コメント入力欄のテキストを読み取り、空でなければaddCommentで保存する。
+    // 【結果】投稿後、同じ編集モーダルを再度開き直して最新のコメント一覧を表示する。
+    async function handlePostModalCommentButtonClick(schedule, hasChildren) {
+      const textInput = document.getElementById("scheduleModalCommentTextInput");
+      if (!textInput) return;
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addComment({ id: generateId(), taskId: schedule.id, text, createdAt: new Date().toISOString() });
+      await openScheduleModal(schedule, hasChildren, null);
+    }
+
+    // 【前提】commentId は削除したいコメントのid。schedule・hasChildrenはモーダル再描画用。
+    // 【処理】即時メモの個別削除と同じ方針（確認なし即削除）でdeleteCommentする。
+    // 【結果】削除後、同じ編集モーダルを再度開き直す。
+    async function handleDeleteModalCommentButtonClick(commentId, schedule, hasChildren) {
+      await deleteComment(commentId);
+      await openScheduleModal(schedule, hasChildren, null);
     }
 
     function handleAddScheduleButtonClick() {
