@@ -1867,6 +1867,8 @@
     //   ・parentNodeId にインデックスが無いため、子孫収集は getIssuesByProject の結果を
     //     アプリ層でツリー走査する（issues側のCRUD設計方針と同じ理由）
     //   なお issues は LOGGED_STORES に含まれるため、schedules と同様に個別の削除ログを残す。
+    //   子孫id収集はcollectIssueSubtreeIds（折りたたみ機能と共通）に委譲し、ここで
+    //   ツリー走査ロジックを重複させない。
     //
     // 【前提】issueId は削除起点のノード id。projectId は所属プロジェクトの id。
     // 【処理】起点＋全子孫ノードを収集し、それぞれ削除・削除ログ記録を行う。
@@ -1874,30 +1876,11 @@
     async function deleteIssueCascade(issueId, projectId) {
       const allIssues = await getIssuesByProject(projectId);
       const issueById = new Map(allIssues.map((issue) => [issue.id, issue]));
-      const targetIssue = issueById.get(issueId);
-      if (!targetIssue) {
+      if (!issueById.has(issueId)) {
         return [];
       }
 
-      const childIssuesByParentNodeId = new Map();
-      for (const issue of allIssues) {
-        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
-        if (!childIssuesByParentNodeId.has(issue.parentNodeId)) {
-          childIssuesByParentNodeId.set(issue.parentNodeId, []);
-        }
-        childIssuesByParentNodeId.get(issue.parentNodeId).push(issue);
-      }
-
-      const idsToDelete = [];
-      let frontier = [targetIssue];
-      while (frontier.length > 0) {
-        const nextFrontier = [];
-        for (const node of frontier) {
-          idsToDelete.push(node.id);
-          nextFrontier.push(...(childIssuesByParentNodeId.get(node.id) || []));
-        }
-        frontier = nextFrontier;
-      }
+      const idsToDelete = collectIssueSubtreeIds(allIssues, issueId);
 
       for (const id of idsToDelete) {
         const issue = issueById.get(id);
@@ -4009,8 +3992,27 @@
         await handleAddSiblingIssueButtonClick(issueId);
       } else if (action === "toggle-collapse") {
         handleToggleIssueCollapseButtonClick(issueId);
+      } else if (action === "delete") {
+        await handleDeleteIssueButtonClick(issueId);
       }
-      // "delete"は連鎖削除のUI接続で対応する。
+    }
+
+    // 【前提】issueId は削除起点のノードid。
+    // 【処理】削除対象件数（起点＋子孫）をcollectIssueSubtreeIdsで数え、詳細設計書3.5.3節の
+    //   仕様どおり3件を超える場合のみconfirm()で確認する（3件以下は誤操作しても
+    //   取り返しがつく範囲とみなし、即削除する）。
+    // 【結果】確認OK、または3件以下ならdeleteIssueCascadeで削除しパネルを再描画する。
+    //   キャンセル時は何もしない。
+    async function handleDeleteIssueButtonClick(issueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      if (!issueList.some((issue) => issue.id === issueId)) return;
+      const subtreeIds = collectIssueSubtreeIds(issueList, issueId);
+      if (subtreeIds.length > 3) {
+        const confirmMessage = `このノードと子孫ノード計${subtreeIds.length}件を削除しますか？`;
+        if (!window.confirm(confirmMessage)) return;
+      }
+      await deleteIssueCascade(issueId, currentSelectedProjectId);
+      await refreshMindmapPanel(currentSelectedProjectId);
     }
 
     // 【前提】issueId は開閉を切り替えたいノードのid。
