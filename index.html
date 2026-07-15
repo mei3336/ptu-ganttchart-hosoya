@@ -39,6 +39,14 @@
       --timeline-header-height: 82px;
       --milestone-marker-height: 20px;
       --wbs-panel-width: 520px;
+      --header-primary-height: 52px;
+      --header-secondary-height: 34px;
+      /* ガント本体の最低の高さ（グリッド背景・今日マーカーが画面の表示領域の下端まで
+         届くようにするため）。第1・第2ヘッダーとタイムラインヘッダーの高さを画面の高さ
+         から差し引いた残りとする。ロック帯（表示時のみ現れる）の高さはCSSだけでは
+         動的に計算できないため考慮していない（表示中は本体の下端がその分だけ画面外に
+         はみ出す可能性があるが、機能的な問題ではないため許容する）。 */
+      --gantt-body-min-height: calc(100vh - var(--header-primary-height) - var(--header-secondary-height) - var(--timeline-header-height));
     }
 
     * {
@@ -67,14 +75,14 @@
     }
 
     .app-header-primary {
-      height: 52px;
+      height: var(--header-primary-height);
       background: var(--color-white);
       border-bottom: 1px solid var(--color-border);
       box-shadow: var(--shadow-small);
     }
 
     .app-header-secondary {
-      height: 34px;
+      height: var(--header-secondary-height);
       background: var(--color-surface-2);
       border-bottom: 1px solid var(--color-border);
       font-size: 12px;
@@ -334,6 +342,17 @@
       bottom: 0;
       width: 0;
       border-left: 1px dashed var(--color-border-dark);
+    }
+
+    /* 「今日」を示す縦のハイライト線。マイルストーン線と同じくtop:0;bottom:0で
+       .gantt-body（親要素）の高さいっぱいに伸びる（JS側では高さを指定しない）。 */
+    .gantt-today-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--color-danger);
+      z-index: 1;
     }
 
     .gantt-milestone-diamond {
@@ -1664,6 +1683,20 @@
       return Math.round((targetTimestamp - startTimestamp) / MILLISECONDS_PER_DAY);
     }
 
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。timelineStartDateString は
+    //   タイムライン先頭日。todayDateString は基準日（"YYYY-MM-DD"）。呼び出し元（refreshGanttPanel）が
+    //   `new Date()`から求めて渡す。この関数自体はnew Date()を呼ばない（固定値を渡してテストできる
+    //   ようにするため。純粋関数として保つ設計判断）。
+    // 【処理】基準日がタイムライン表示範囲内にあるかを判定し、範囲内ならx座標(px)を計算する。
+    // 【結果】範囲内ならleftPx（数値）、範囲外（表示中のプロジェクト期間の外）ならnullを返す。
+    function calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString) {
+      const dayOffset = calculateDayOffsetFromTimelineStart(todayDateString, timelineStartDateString);
+      if (dayOffset < 0 || dayOffset >= timelineDays.length) {
+        return null;
+      }
+      return dayOffset * pixelsPerDay;
+    }
+
     // 【前提】schedule.startDate/endDateのどちらかが未設定の場合、バーは描画できない
     //   （データモデル設計3.2節：両方とも必須ではないフィールドのため）。
     // 【処理】タイムライン先頭日・1日あたりのピクセル幅から、バーのleft/widthをpx単位で計算する。
@@ -1907,18 +1940,28 @@
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
-    //   buildGanttTimelineDays の戻り値。milestones は project.milestones。
+    //   buildGanttTimelineDays の戻り値。milestones は project.milestones。todayDateString は
+    //   基準日（"YYYY-MM-DD"）。呼び出し元がnew Date()から求めて渡す（純粋関数として保つため）。
     // 【処理】列の背景（「日」表示は土日の色分け、それ以外の粒度は縞模様）、行の背景、バー
     //   （親行は太め・中央配置、葉行は細め・行の65%位置、完了ステータスは半透明）、
-    //   マイルストーンの縦線＋ひし形マーカーをすべて絶対配置のdivとして組み立てる
-    //   （UIデザイン仕様書3章の視覚仕様に準拠）。
+    //   マイルストーンの縦線＋ひし形マーカー、今日を示す縦のハイライト線をすべて絶対配置の
+    //   divとして組み立てる（UIデザイン仕様書3章の視覚仕様に準拠）。
     // 【設計判断：スケジュール0件でも列は必ずプロジェクト全期間ぶん描画する】
     //   以前は「0件なら本体を描画せずメッセージのみ」としていたため、列（背景の縞模様）自体が
     //   全く生成されない不具合があった。列の生成（periodColumnsHtml）と行の生成
     //   （rowBackgroundsHtml・barsHtml、0件なら単に空文字列になるだけ）を分離し、
     //   0件時は「空状態メッセージを上に重ねて表示するが、列は最後まで描画されている」形にする。
+    // 【設計判断：グリッド背景（列の色帯）・マイルストーン線・今日マーカーの高さを
+    //   実データ行数に縛られないようにする】
+    //   これら3種類の縦の要素は、CSS側で`top:0;bottom:0`にして「親要素(.gantt-body)の
+    //   実際の高さいっぱいに伸びる」設計にする（pxで高さを指定しない）。.gantt-body自体の
+    //   高さを「実データ行数ぶん」と「画面の表示領域の高さ」のどちらか大きい方にすれば
+    //   （後述のtotalHeightPx／CSS変数--gantt-body-min-heightのmax()）、この3種類は
+    //   自動的にその高さまで届く。逆に、以前のようにこれらの要素へ個別にpx単位の高さを
+    //   指定してしまうと、指定した値がCSSのtop/bottom挙動より優先されてしまい、
+    //   実データ行数分の高さで頭打ちになる（今回の不具合の原因）。
     // 【結果】gantt-bodyのHTML文字列を返す。
-    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
+    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       const totalWidthPx = timelineDays.length * pixelsPerDay;
       const totalHeightPx = Math.max(scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX, GANTT_ROW_HEIGHT_PX);
 
@@ -1962,29 +2005,39 @@
         })
         .join("");
 
+      // 【前提】マイルストーン線・今日マーカーはどちらも「left位置だけ決めて、高さは
+      //   CSSのtop:0;bottom:0に任せる」ため、ここでは高さ(height)を指定しない。
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
         .map(
           (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px;height:${totalHeightPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
+            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
         )
         .join("");
+
+      const todayMarkerLeftPx = calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString);
+      const todayMarkerHtml =
+        todayMarkerLeftPx === null ? "" : `<div class="gantt-today-marker" style="left:${todayMarkerLeftPx}px" title="今日"></div>`;
 
       const emptyMessageHtml =
         scheduleTreeRows.length === 0 ? '<p class="empty-state-message gantt-empty-overlay">スケジュールがありません。</p>' : "";
 
-      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${emptyMessageHtml}</div>`;
+      // 【設計判断：.gantt-bodyの高さは「実データ行数」と「画面の表示領域の高さ」の
+      //   大きい方にする】CSSのmax()を使い、実データが画面より多ければ実データの高さ
+      //   （＝縦スクロールが発生する）、少なければ画面の表示領域の下端まで
+      //   （--gantt-body-min-height、:root定義）を採用する。
+      return `<div class="gantt-body" style="width:${totalWidthPx}px;min-height:max(${totalHeightPx}px, var(--gantt-body-min-height))">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${todayMarkerHtml}${emptyMessageHtml}</div>`;
     }
 
     // 【前提】scheduleTreeRows・timelineDays・milestonesは上記各関数の戻り値・入力と同じ。
-    //   granularityは表示粒度。
+    //   granularityは表示粒度。todayDateStringは基準日（呼び出し元がnew Date()から求めて渡す）。
     // 【処理】タイムラインヘッダーとガント本体を連結する（ガントパネル全体の組み立て窓口）。
     //   スケジュールが0件でも、ヘッダー・本体とも必ずプロジェクト全期間ぶんの列を描画する
     //   （0件用の早期returnは行わない。今回修正した不具合の要点）。
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
+    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       return (
         renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) +
-        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity)
+        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString)
       );
     }
 
@@ -2117,6 +2170,7 @@
       currentTimelineStartDateString = currentProjectObject.startDate;
       const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
       const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
+      const todayDateString = new Date().toISOString().slice(0, 10);
       applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
       applyGanttPanel(
         renderGanttChartToHtml(
@@ -2125,7 +2179,8 @@
           pixelsPerDay,
           currentProjectObject.milestones,
           currentProjectObject.startDate,
-          currentGranularity
+          currentGranularity,
+          todayDateString
         )
       );
     }
