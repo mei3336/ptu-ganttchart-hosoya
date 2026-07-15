@@ -299,6 +299,12 @@
       background: rgba(220, 38, 38, .05);
     }
 
+    /* 週/1ヶ月/3ヶ月表示では土日という概念が意味を持たないため、縞模様で列の区切りだけを示す。 */
+    .gantt-day-column-bg.is-alt-period {
+      background: var(--color-surface-3);
+      opacity: .4;
+    }
+
     /* バーの視覚仕様（UIデザイン仕様書3章）：親行は太め・角丸大きめで行中央、
        子（葉）行は薄めで行の65%あたりの位置。完了ステータスは不透明度を下げる。 */
     .gantt-bar {
@@ -418,6 +424,190 @@
       color: var(--color-text-light);
       padding: 16px;
     }
+
+    /* ガント本体が0件のとき、列（背景の縞模様）はそのまま描画した上に
+       メッセージだけを重ねて表示する（列自体を消さない）。 */
+    .gantt-empty-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      padding: 0;
+      white-space: nowrap;
+    }
+
+    /* ===== モーダル・ダイアログ一覧①：中央モーダル（UIデザイン仕様書2.3節） ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, .5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay[hidden] {
+      display: none;
+    }
+
+    .modal-panel {
+      background: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      padding: 20px;
+      width: 420px;
+      max-width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .modal-panel h2 {
+      margin: 0 0 16px;
+      font-size: 15px;
+      color: var(--color-text-dark);
+    }
+
+    .modal-field {
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .modal-field label {
+      font-size: 12px;
+      color: var(--color-text-mid);
+    }
+
+    .modal-field input[type="text"],
+    .modal-field input[type="date"],
+    .modal-field select,
+    .modal-field textarea {
+      padding: 6px 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .modal-color-palette {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .modal-color-swatch {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+
+    .modal-color-swatch.is-selected {
+      border-color: var(--color-text-dark);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .modal-button-primary {
+      padding: 6px 14px;
+      border-radius: var(--radius-standard);
+      border: 1px solid var(--color-accent);
+      background: var(--color-accent);
+      color: var(--color-white);
+      cursor: pointer;
+    }
+
+    .modal-button-secondary {
+      padding: 6px 14px;
+      border-radius: var(--radius-standard);
+      border: 1px solid var(--color-border-dark);
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      cursor: pointer;
+    }
+
+    .wbs-row[data-schedule-id] {
+      cursor: pointer;
+    }
+
+    /* ===== モーダル・ダイアログ一覧②：右側スライドパネル（UIデザイン仕様書2.2節） =====
+       ガント画面（背後）を隠さず、画面右端からスライドインする。×またはヘッダーの同じ
+       ボタンをもう一度押すと閉じる。パネル幅は機能ごとに異なる想定（今回はタスク管理のみ実装）。 */
+    .slide-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 640px;
+      max-width: 92vw;
+      background: var(--color-white);
+      box-shadow: var(--shadow-large);
+      z-index: 90;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform .2s ease;
+      pointer-events: none;
+    }
+
+    .slide-panel.is-open {
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    .slide-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .slide-panel-header h2 {
+      margin: 0;
+      font-size: 15px;
+      color: var(--color-text-dark);
+    }
+
+    .slide-panel-close-button {
+      border: none;
+      background: none;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      color: var(--color-text-mid);
+    }
+
+    .slide-panel-body {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .kanban-add-form {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px;
+      background: var(--color-white);
+      border: 1px dashed var(--color-border-dark);
+      border-radius: var(--radius-standard);
+    }
+
+    .kanban-add-form input,
+    .kanban-add-form select {
+      padding: 4px 6px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -442,18 +632,17 @@
     <div class="header-group">
       <button id="lockToggleButton" class="toolbar-button" type="button">🔒 ロック</button>
       <button id="addScheduleButton" class="toolbar-button" type="button">＋ スケジュール追加</button>
-      <!-- 表示粒度は「日」のみ実装（週/月表示は別工程）。ボタンは視覚的に揃えるが「日」以外は無効化する。 -->
-      <button class="toolbar-button is-active" type="button" disabled>日</button>
-      <button class="toolbar-button" type="button" disabled>週</button>
-      <button class="toolbar-button" type="button" disabled>1ヶ月</button>
-      <button class="toolbar-button" type="button" disabled>3ヶ月</button>
+      <button class="toolbar-button is-active" type="button" data-granularity="day">日</button>
+      <button class="toolbar-button" type="button" data-granularity="week">週</button>
+      <button class="toolbar-button" type="button" data-granularity="month">1ヶ月</button>
+      <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
       <button class="toolbar-button" type="button" data-out-of-scope-label="全て開く・全て閉じる">全て開く／閉じる</button>
       <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
       <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
       <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
       <button class="toolbar-button" type="button" data-out-of-scope-label="マイルストーン管理">マイルストーン</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="プロジェクト編集">編集</button>
+      <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
     <div class="header-group">
       <!-- スナップショット／即時メモ／メモ／コメント／変更履歴はサイドパネル機能のため今回のスコープ外。 -->
@@ -478,15 +667,28 @@
         </div>
       </div>
     </section>
-    <section id="kanbanPanel" hidden>
-      <button id="addTaskButton" class="panel-add-button" type="button">＋ タスク追加</button>
-      <div id="kanbanPanelBody"></div>
-    </section>
     <section id="mindmapPanel" hidden>
       <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
       <div id="mindmapPanelBody"></div>
     </section>
   </main>
+
+  <!-- モーダル・ダイアログ一覧②：右側スライドパネル（P1タスク管理）。ガント画面の上に
+       スライドインし、背後（ガント画面）は隠さない。P2〜P7は同じ構造を流用する想定。 -->
+  <aside id="kanbanSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>タスク管理</h2>
+      <button type="button" id="closeKanbanPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div id="kanbanPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- モーダル・ダイアログ一覧①：中央モーダルの共通の入れ物。中身はopenModal()で差し替える。 -->
+  <div id="modalOverlay" class="modal-overlay" hidden>
+    <div class="modal-panel" id="modalPanel"></div>
+  </div>
 
   <script>
     "use strict";
@@ -1344,8 +1546,11 @@
     // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
     const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
 
-    // ガント1日あたりの描画幅（px）。表示粒度は「日」のみ実装するため固定値とする。
-    const PIXELS_PER_DAY = 32;
+    // ガント1日あたりの描画幅（px）。表示粒度（日/週/1ヶ月/3ヶ月）ごとに、全体の横幅が
+    // 極端に長大化しないよう、粒度が粗くなるほど1日あたりの幅を狭くする。
+    const GRANULARITY_PIXELS_PER_DAY = { day: 32, week: 6, month: 2.2, quarter: 0.9 };
+    // 現在選択中の表示粒度（"day" | "week" | "month" | "quarter"）。
+    let currentGranularity = "day";
     // ガント1行の高さ（px）。CSS変数 --gantt-row-height と同じ値を保つこと（JS側で絶対配置の
     // 計算に使うため、CSSだけでなくJS定数としても持つ）。
     const GANTT_ROW_HEIGHT_PX = 44;
@@ -1555,54 +1760,167 @@
             visibleColumns.endDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.endDate)}</div>` : "",
             visibleColumns.status ? `<div class="wbs-column-extra">${escapeHtmlText(statusLabel)}</div>` : "",
           ].join("");
-          return `<div class="wbs-row"><div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
+          return `<div class="wbs-row" data-schedule-id="${escapeHtmlText(schedule.id)}"><div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
         })
         .join("");
       return headerHtml + rowsHtml;
     }
 
-    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。
-    // 【処理】年月ラベル（連続する同年月をまとめて幅を合算）と、日付見出し（土日で背景色を変える）
-    //   のHTML文字列を組み立てる（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
-    //   年月40px＋日付42px相当として配分）。
-    // 【結果】gantt-timeline-headerのHTML文字列を返す。
-    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) {
-      const monthLabelsHtml = [];
-      let groupStartIndex = 0;
-      for (let index = 1; index <= timelineDays.length; index++) {
-        const isGroupBoundary =
-          index === timelineDays.length ||
-          timelineDays[index].year !== timelineDays[groupStartIndex].year ||
-          timelineDays[index].month !== timelineDays[groupStartIndex].month;
-        if (!isGroupBoundary) continue;
-        const groupDayCount = index - groupStartIndex;
-        const { year, month } = timelineDays[groupStartIndex];
-        monthLabelsHtml.push(
-          `<div class="gantt-month-label" style="left:${groupStartIndex * pixelsPerDay}px;width:${groupDayCount * pixelsPerDay}px">${year}年${month}月</div>`
-        );
-        groupStartIndex = index;
+    // 【前提】month は1〜12の整数。
+    // 【処理】月から四半期番号（1〜4）を求める（Q1=1-3月, Q2=4-6月, Q3=7-9月, Q4=10-12月）。
+    // 【結果】四半期番号を返す。
+    function calculateQuarterNumber(month) {
+      return Math.ceil(month / 3);
+    }
+
+    // 【設計判断：なぜtimelineDaysは常に「日」単位のままなのか】
+    //   表示粒度（日/週/1ヶ月/3ヶ月）が変わっても、buildGanttTimelineDaysが返す「プロジェクト
+    //   全期間ぶんの日単位配列」自体は作り直さない。粒度ごとの見出し・列幅は、この日単位配列を
+    //   「どうグルーピングするか」だけを変えて表現する。こうすることで、
+    //   ①スケジュール件数に関係なくプロジェクト全期間の列が必ず生成される（今回の不具合の根本原因は
+    //   　0件時に本体の描画自体を早期returnでスキップしていたこと。グルーピング元を「常に完全な
+    //   　日単位配列」に統一し、行の有無と列の生成を分離することで解消する）、
+    //   ②粒度切替のたびに日付計算をやり直さずに済む、という2つの利点がある。
+    //
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値（必ずプロジェクト全期間ぶん）。
+    //   granularity は "day" | "week" | "month" | "quarter"。
+    // 【処理】1段目（大分類の見出し）・2段目（詳細列の見出し）を、指定した粒度でグルーピングする。
+    //   - day：2段目=1日ごと（日付）／1段目=同年月をまとめた「年月」
+    //   - week：2段目=7日ごと（先頭日の月/日）／1段目=先頭日が属する「年月」
+    //   - month：2段目=暦月ごと（月）／1段目=同じ（年,四半期）をまとめた「年 Q数」
+    //   - quarter：2段目=暦四半期ごと（Q数（開始月-終了月月））／1段目=同じ年をまとめた「年」
+    //   いずれの粒度でも、timelineDaysの全区間を漏れなくグループ化する（途中で打ち切らない）。
+    // 【結果】{ level1Groups, level2Groups } を返す。各グループは
+    //   { label, startIndex, dayCount } を持ち、startIndex/dayCountはtimelineDays配列上の
+    //   位置・日数（px座標の計算にそのまま使える）。
+    function buildGanttTimelineHeaderGroups(timelineDays, granularity) {
+      const level2Groups = [];
+
+      if (granularity === "day") {
+        timelineDays.forEach((day, index) => {
+          level2Groups.push({
+            label: String(day.dayOfMonth),
+            startIndex: index,
+            dayCount: 1,
+            level1Key: `${day.year}-${day.month}`,
+            level1Label: `${day.year}年${day.month}月`,
+          });
+        });
+      } else if (granularity === "week") {
+        for (let startIndex = 0; startIndex < timelineDays.length; startIndex += 7) {
+          const dayCount = Math.min(7, timelineDays.length - startIndex);
+          const firstDay = timelineDays[startIndex];
+          level2Groups.push({
+            label: `${firstDay.month}/${firstDay.dayOfMonth}`,
+            startIndex,
+            dayCount,
+            level1Key: `${firstDay.year}-${firstDay.month}`,
+            level1Label: `${firstDay.year}年${firstDay.month}月`,
+          });
+        }
+      } else if (granularity === "month") {
+        let groupStartIndex = 0;
+        for (let index = 1; index <= timelineDays.length; index++) {
+          const isBoundary =
+            index === timelineDays.length ||
+            timelineDays[index].year !== timelineDays[groupStartIndex].year ||
+            timelineDays[index].month !== timelineDays[groupStartIndex].month;
+          if (!isBoundary) continue;
+          const { year, month } = timelineDays[groupStartIndex];
+          const quarter = calculateQuarterNumber(month);
+          level2Groups.push({
+            label: `${month}月`,
+            startIndex: groupStartIndex,
+            dayCount: index - groupStartIndex,
+            level1Key: `${year}-Q${quarter}`,
+            level1Label: `${year}年 Q${quarter}`,
+          });
+          groupStartIndex = index;
+        }
+      } else if (granularity === "quarter") {
+        let groupStartIndex = 0;
+        for (let index = 1; index <= timelineDays.length; index++) {
+          const currentQuarter = calculateQuarterNumber(timelineDays[groupStartIndex].month);
+          const isBoundary =
+            index === timelineDays.length ||
+            timelineDays[index].year !== timelineDays[groupStartIndex].year ||
+            calculateQuarterNumber(timelineDays[index].month) !== currentQuarter;
+          if (!isBoundary) continue;
+          const { year } = timelineDays[groupStartIndex];
+          const quarterStartMonth = (currentQuarter - 1) * 3 + 1;
+          const quarterEndMonth = quarterStartMonth + 2;
+          level2Groups.push({
+            label: `Q${currentQuarter}（${quarterStartMonth}-${quarterEndMonth}月）`,
+            startIndex: groupStartIndex,
+            dayCount: index - groupStartIndex,
+            level1Key: `${year}`,
+            level1Label: `${year}年`,
+          });
+          groupStartIndex = index;
+        }
       }
 
-      const dayHeadersHtml = timelineDays
-        .map((day, index) => {
-          const weekendClass = day.isSaturday ? " is-saturday" : day.isSunday ? " is-sunday" : "";
-          return `<div class="gantt-day-column-header${weekendClass}" style="left:${index * pixelsPerDay}px;width:${pixelsPerDay}px">${day.dayOfMonth}</div>`;
+      // 1段目は、連続するlevel2Groupsのうちlevel1Keyが同じものをまとめて1つの見出しにする。
+      const level1Groups = [];
+      for (const level2Group of level2Groups) {
+        const lastLevel1Group = level1Groups[level1Groups.length - 1];
+        if (lastLevel1Group && lastLevel1Group.level1Key === level2Group.level1Key) {
+          lastLevel1Group.dayCount += level2Group.dayCount;
+        } else {
+          level1Groups.push({
+            label: level2Group.level1Label,
+            level1Key: level2Group.level1Key,
+            startIndex: level2Group.startIndex,
+            dayCount: level2Group.dayCount,
+          });
+        }
+      }
+
+      return { level1Groups, level2Groups };
+    }
+
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。granularity は表示粒度。
+    // 【処理】buildGanttTimelineHeaderGroupsで1段目・2段目の見出しグループを求め、
+    //   それぞれをHTML文字列化する（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
+    //   1段目40px＋2段目42px相当として配分）。土日の色分けは「日」表示のときのみ意味を持つ。
+    // 【結果】gantt-timeline-headerのHTML文字列を返す。
+    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) {
+      const { level1Groups, level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
+
+      const level1Html = level1Groups
+        .map(
+          (group) =>
+            `<div class="gantt-month-label" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px">${escapeHtmlText(group.label)}</div>`
+        )
+        .join("");
+
+      const level2Html = level2Groups
+        .map((group) => {
+          const firstDay = timelineDays[group.startIndex];
+          const weekendClass = granularity === "day" ? (firstDay.isSaturday ? " is-saturday" : firstDay.isSunday ? " is-sunday" : "") : "";
+          return `<div class="gantt-day-column-header${weekendClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px">${escapeHtmlText(group.label)}</div>`;
         })
         .join("");
 
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${monthLabelsHtml.join("")}${dayHeadersHtml}</div>`;
+      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${level1Html}${level2Html}</div>`;
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
     //   buildGanttTimelineDays の戻り値。milestones は project.milestones。
-    // 【処理】行の背景（縞模様＋土日列の色付け）、バー（親行は太め・中央配置、葉行は細め・
-    //   行の65%位置、完了ステータスは半透明）、マイルストーンの縦線＋ひし形マーカーを
-    //   すべて絶対配置のdivとして組み立てる（UIデザイン仕様書3章の視覚仕様に準拠）。
+    // 【処理】列の背景（「日」表示は土日の色分け、それ以外の粒度は縞模様）、行の背景、バー
+    //   （親行は太め・中央配置、葉行は細め・行の65%位置、完了ステータスは半透明）、
+    //   マイルストーンの縦線＋ひし形マーカーをすべて絶対配置のdivとして組み立てる
+    //   （UIデザイン仕様書3章の視覚仕様に準拠）。
+    // 【設計判断：スケジュール0件でも列は必ずプロジェクト全期間ぶん描画する】
+    //   以前は「0件なら本体を描画せずメッセージのみ」としていたため、列（背景の縞模様）自体が
+    //   全く生成されない不具合があった。列の生成（periodColumnsHtml）と行の生成
+    //   （rowBackgroundsHtml・barsHtml、0件なら単に空文字列になるだけ）を分離し、
+    //   0件時は「空状態メッセージを上に重ねて表示するが、列は最後まで描画されている」形にする。
     // 【結果】gantt-bodyのHTML文字列を返す。
-    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString) {
+    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      const totalHeightPx = scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX;
+      const totalHeightPx = Math.max(scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX, GANTT_ROW_HEIGHT_PX);
 
       const rowBackgroundsHtml = scheduleTreeRows
         .map((_, rowIndex) => {
@@ -1611,11 +1929,18 @@
         })
         .join("");
 
-      const weekendColumnsHtml = timelineDays
-        .map((day, index) => {
-          if (!day.isSaturday && !day.isSunday) return "";
-          const weekendClass = day.isSaturday ? "is-saturday" : "is-sunday";
-          return `<div class="gantt-day-column-bg ${weekendClass}" style="left:${index * pixelsPerDay}px;width:${pixelsPerDay}px"></div>`;
+      const { level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
+      const periodColumnsHtml = level2Groups
+        .map((group, groupIndex) => {
+          const firstDay = timelineDays[group.startIndex];
+          let backgroundClass = "";
+          if (granularity === "day") {
+            backgroundClass = firstDay.isSaturday ? "is-saturday" : firstDay.isSunday ? "is-sunday" : "";
+          } else if (groupIndex % 2 === 1) {
+            backgroundClass = "is-alt-period";
+          }
+          if (!backgroundClass) return "";
+          return `<div class="gantt-day-column-bg ${backgroundClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px"></div>`;
         })
         .join("");
 
@@ -1644,31 +1969,57 @@
         )
         .join("");
 
-      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${rowBackgroundsHtml}${weekendColumnsHtml}${barsHtml}${milestoneMarkersHtml}</div>`;
+      const emptyMessageHtml =
+        scheduleTreeRows.length === 0 ? '<p class="empty-state-message gantt-empty-overlay">スケジュールがありません。</p>' : "";
+
+      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${emptyMessageHtml}</div>`;
     }
 
     // 【前提】scheduleTreeRows・timelineDays・milestonesは上記各関数の戻り値・入力と同じ。
+    //   granularityは表示粒度。
     // 【処理】タイムラインヘッダーとガント本体を連結する（ガントパネル全体の組み立て窓口）。
+    //   スケジュールが0件でも、ヘッダー・本体とも必ずプロジェクト全期間ぶんの列を描画する
+    //   （0件用の早期returnは行わない。今回修正した不具合の要点）。
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString) {
-      if (scheduleTreeRows.length === 0) {
-        return renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) + '<p class="empty-state-message">スケジュールがありません。</p>';
-      }
+    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
       return (
-        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) +
-        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString)
+        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) +
+        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity)
       );
     }
 
-    // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の日本語見出し。
-    // 【処理】1列分のカンバンカードのHTML文字列を組み立てる。
+    // タスクのpriority（1:高〜4:なし）の日本語表示名（データモデル設計3.3節）。
+    const TASK_PRIORITY_LABELS = { 1: "高", 2: "中", 3: "低", 4: "なし" };
+
+    // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の
+    //   日本語見出し。columnStatusValue はそのstatus文字列（追加フォームの送信先に使う）。
+    // 【処理】1列分のカンバンカードと、モーダル・ダイアログ一覧P1「各列に追加フォームが
+    //   直接埋め込み」の仕様どおり、タスク名・優先度・期日の埋め込み追加フォームを
+    //   組み立てる（モーダルを介さない）。
     // 【結果】renderKanbanBoardToHtml から列単位で呼び出されるHTML文字列を返す。
-    function renderKanbanColumnToHtml(taskListForColumn, columnLabel) {
+    function renderKanbanColumnToHtml(taskListForColumn, columnLabel, columnStatusValue) {
       const cardsHtml =
         taskListForColumn.length === 0
           ? '<p class="empty-state-message">タスクがありません。</p>'
-          : taskListForColumn.map((task) => `<div class="kanban-card">${escapeHtmlText(task.title)}</div>`).join("");
-      return `<div class="kanban-column"><h3>${escapeHtmlText(columnLabel)}</h3>${cardsHtml}</div>`;
+          : taskListForColumn
+              .map(
+                (task) =>
+                  `<div class="kanban-card">${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>`
+              )
+              .join("");
+
+      const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
+        .map(([value, label]) => `<option value="${value}"${value === "4" ? " selected" : ""}>${label}</option>`)
+        .join("");
+      const addFormHtml = `
+        <div class="kanban-add-form" data-column-status="${columnStatusValue}">
+          <input type="text" class="kanban-add-title-input" placeholder="タスク名">
+          <select class="kanban-add-priority-select">${priorityOptionsHtml}</select>
+          <input type="date" class="kanban-add-duedate-input">
+          <button type="button" class="panel-add-button kanban-add-submit-button">＋ 追加</button>
+        </div>
+      `;
+      return `<div class="kanban-column"><h3>${escapeHtmlText(columnLabel)}</h3>${cardsHtml}${addFormHtml}</div>`;
     }
 
     // 【前提】taskGroupsByStatus は groupTasksByStatus の戻り値。
@@ -1676,9 +2027,9 @@
     // 【結果】カンバンパネルのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderKanbanBoardToHtml(taskGroupsByStatus) {
       return `<div class="kanban-board">
-        ${renderKanbanColumnToHtml(taskGroupsByStatus.backlog, "未着手")}
-        ${renderKanbanColumnToHtml(taskGroupsByStatus.doing, "進行中")}
-        ${renderKanbanColumnToHtml(taskGroupsByStatus.done, "完了")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.backlog, "未着手", "backlog")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.doing, "進行中", "doing")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.done, "完了", "done")}
       </div>`;
     }
 
@@ -1765,9 +2116,17 @@
       currentScheduleTreeRows = buildScheduleTreeRows(scheduleList);
       currentTimelineStartDateString = currentProjectObject.startDate;
       const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
+      const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
       applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
       applyGanttPanel(
-        renderGanttChartToHtml(currentScheduleTreeRows, timelineDays, PIXELS_PER_DAY, currentProjectObject.milestones, currentProjectObject.startDate)
+        renderGanttChartToHtml(
+          currentScheduleTreeRows,
+          timelineDays,
+          pixelsPerDay,
+          currentProjectObject.milestones,
+          currentProjectObject.startDate,
+          currentGranularity
+        )
       );
     }
 
@@ -1812,85 +2171,354 @@
       ]);
     }
 
-    // 【前提】viewName は "gantt" | "kanban" | "mindmap" のいずれか。
+    // 【設計判断：タスク管理(P1)は右側スライドパネル化したがマインドマップ(P7)はまだ未着手】
+    //   モーダル・ダイアログ一覧の訂正指示どおり、第2ヘッダー右側の7機能は本来すべて
+    //   ②右側スライドパネルであるべきだが、今回はP1（タスク管理）のみをスライドパネルへ
+    //   作り直した。マインドマップは旧方式（ガントと排他的に表示を切り替える）のまま
+    //   据え置いている（時間都合により別工程）。そのため switchMainView は
+    //   "gantt" | "mindmap" の2値のみを扱う（"kanban"はここでは扱わない）。
+    //
+    // 【前提】viewName は "gantt" | "mindmap" のいずれか。
     // 【処理】該当するセクションだけを表示し、他は隠す。ヘッダー右側の「マインドマップ」
-    //   「タスク管理」ボタンの選択状態も合わせて切り替える（基本設計書2.1節：第2ヘッダー右側）。
-    //   データの再取得は行わない（表示・非表示の切り替えのみの責務）。
+    //   ボタンの選択状態も合わせて切り替える。データの再取得は行わない。
     // 【結果】指定したビューだけが画面に表示される。
     function switchMainView(viewName) {
       currentMainView = viewName;
       document.getElementById("ganttPanel").hidden = viewName !== "gantt";
-      document.getElementById("kanbanPanel").hidden = viewName !== "kanban";
       document.getElementById("mindmapPanel").hidden = viewName !== "mindmap";
-      document.getElementById("switchToKanbanButton").classList.toggle("is-active", viewName === "kanban");
       document.getElementById("switchToMindmapButton").classList.toggle("is-active", viewName === "mindmap");
     }
 
-    // ===== UI：イベントハンドラ =====
-    // 【設計判断】prompt()による最小限の入力収集のみを行う（バリデーション・詳細フォームは
-    //   今回のスコープ外）。データが1件も無いと画面が常に空欄のままになるため、各ストアに
-    //   最低限の追加手段だけを用意する。削除UIは今回のスコープ外。
-
-    async function handleCreateProjectButtonClick() {
-      const projectName = window.prompt("プロジェクト名を入力してください");
-      if (!projectName) return;
-      const todayDateString = new Date().toISOString().slice(0, 10);
-      const newProject = {
-        id: generateId(),
-        name: projectName,
-        startDate: todayDateString,
-        endDate: todayDateString,
-        milestones: [],
-        locked: false,
-        createdAt: new Date().toISOString(),
-      };
-      await addProject(newProject);
-      await refreshProjectSelectDropdown();
-      document.getElementById("projectSelectDropdown").value = newProject.id;
-      await switchToProject(newProject.id);
+    // 【前提】panelId はスライドパネル要素のid（例："kanbanSlidePanel"）。
+    // 【処理】.is-openクラスの有無で開閉を反転させる（モーダル・ダイアログ一覧②：
+    //   ボタンをもう一度押すと閉じる、という共通挙動）。
+    // 【結果】パネルが開いていれば閉じ、閉じていれば開く。
+    function toggleSlidePanel(panelId) {
+      document.getElementById(panelId).classList.toggle("is-open");
     }
 
-    async function handleAddScheduleButtonClick() {
+    // 【前提】panelId はスライドパネル要素のid。
+    // 【処理】.is-openクラスを外す（×ボタンから閉じる用。開閉トグルではなく必ず閉じる）。
+    // 【結果】パネルが閉じる。
+    function closeSlidePanel(panelId) {
+      document.getElementById(panelId).classList.remove("is-open");
+    }
+
+    // ===== UI：モーダル（モーダル・ダイアログ一覧①：中央モーダル） =====
+    // 【設計判断】M1（新規プロジェクト作成）・M4（スケジュール新規作成・編集）を、
+    // prompt()の連鎖から、UIデザイン仕様書2.3節に沿った中央モーダルへ作り直した。
+    // モーダルの開閉・入れ物（#modalOverlay/#modalPanel）は全モーダル共通で使い回す。
+
+    // 【前提】contentHtml はモーダルパネルに表示するHTML文字列。
+    // 【処理】共通のモーダルオーバーレイにcontentHtmlを差し込んで表示する。
+    // 【結果】画面中央にモーダルが表示される。
+    function openModal(contentHtml) {
+      document.getElementById("modalPanel").innerHTML = contentHtml;
+      document.getElementById("modalOverlay").hidden = false;
+    }
+
+    // 【前提】なし。
+    // 【処理】モーダルを閉じ、中身を空にする（次回開いたときに前回の入力値が残らないようにする）。
+    // 【結果】モーダルが非表示になる。
+    function closeModal() {
+      document.getElementById("modalOverlay").hidden = true;
+      document.getElementById("modalPanel").innerHTML = "";
+    }
+
+    const SCHEDULE_BAR_COLOR_PALETTE = ["#2563EB", "#0891B2", "#059669", "#D97706", "#DC2626", "#7C3AED", "#DB2777", "#EA580C", "#16A34A", "#0E7490", "#4B5563"];
+
+    // 【前提】project はnull（新規作成モード）、または既存プロジェクトオブジェクト（編集モード）。
+    // 【処理】M1/M2共通のプロジェクトモーダルのHTML文字列を組み立てる（DOMには触れない）。
+    //   新規作成時は開始日・終了日の既定値を今日にする（モーダル・ダイアログ一覧M1）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderProjectModalToHtml(project) {
+      const isEditMode = Boolean(project);
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      const nameValue = isEditMode ? project.name : "";
+      const startDateValue = isEditMode ? project.startDate : todayDateString;
+      const endDateValue = isEditMode ? project.endDate : todayDateString;
+      return `
+        <h2>${isEditMode ? "プロジェクト編集" : "新規プロジェクト作成"}</h2>
+        <div class="modal-field">
+          <label for="projectModalNameInput">プロジェクト名</label>
+          <input type="text" id="projectModalNameInput" value="${escapeHtmlText(nameValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="projectModalStartDateInput">開始日</label>
+          <input type="date" id="projectModalStartDateInput" value="${escapeHtmlText(startDateValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="projectModalEndDateInput">終了日</label>
+          <input type="date" id="projectModalEndDateInput" value="${escapeHtmlText(endDateValue)}">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="projectModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="projectModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】existingProject はnull（新規作成）または既存プロジェクトオブジェクト（編集）。
+    // 【処理】プロジェクトモーダルを開き、キャンセル・保存ボタンにイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openProjectModal(existingProject) {
+      openModal(renderProjectModalToHtml(existingProject));
+      document.getElementById("projectModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("projectModalSaveButton").addEventListener("click", () => handleProjectModalSaveButtonClick(existingProject));
+    }
+
+    function handleCreateProjectButtonClick() {
+      openProjectModal(null);
+    }
+
+    function handleEditProjectButtonClick() {
+      if (!currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      openProjectModal(currentProjectObject);
+    }
+
+    // 3年後の判定はうるう年を厳密に数えず、365日×3年分の日数で近似する（実務上十分な簡略化）。
+    const THREE_YEARS_IN_MILLISECONDS = 3 * 365 * MILLISECONDS_PER_DAY;
+
+    // 【前提】input は {name, startDate, endDate}（プロジェクトモーダルの入力値）。
+    // 【処理】モーダル・ダイアログ一覧A1〜A4のバリデーションを順に判定する（DOMには触れない）。
+    //   ※A3はプロジェクト側が`<=`判定（終了日=開始日も拒否）で、スケジュール側（A7）の
+    //   `<`判定とは非対称。これは基本設計書1.3節No.1の既知の非整合として忠実再現する。
+    // 【結果】エラーがあればそのアラート文言（string）を、無ければnullを返す。
+    function validateProjectModalInput(input) {
+      if (!input.name) return "プロジェクト名を入力してください";
+      if (!input.startDate || !input.endDate) return "日付を入力してください";
+      if (input.endDate <= input.startDate) return "終了日は開始日より後にしてください";
+      if (parseDateStringToUtcTimestamp(input.endDate) - parseDateStringToUtcTimestamp(input.startDate) > THREE_YEARS_IN_MILLISECONDS) {
+        return "期間は最大3年です";
+      }
+      return null;
+    }
+
+    // 【前提】existingProject はnull（新規作成）または既存プロジェクトオブジェクト（編集）。
+    // 【処理】モーダル内の入力値を読み取り、validateProjectModalInputでバリデーションし、
+    //   OKならaddProjectで保存してモーダルを閉じ、画面を更新する。
+    // 【結果】保存成功時はモーダルを閉じ、プロジェクト一覧・選択状態を更新する。
+    async function handleProjectModalSaveButtonClick(existingProject) {
+      const name = document.getElementById("projectModalNameInput").value.trim();
+      const startDate = document.getElementById("projectModalStartDateInput").value;
+      const endDate = document.getElementById("projectModalEndDateInput").value;
+
+      const validationError = validateProjectModalInput({ name, startDate, endDate });
+      if (validationError) {
+        window.alert(validationError);
+        return;
+      }
+
+      const projectToSave = existingProject
+        ? { ...existingProject, name, startDate, endDate }
+        : { id: generateId(), name, startDate, endDate, milestones: [], locked: false, createdAt: new Date().toISOString() };
+      await addProject(projectToSave);
+      closeModal();
+      await refreshProjectSelectDropdown();
+      document.getElementById("projectSelectDropdown").value = projectToSave.id;
+      await switchToProject(projectToSave.id);
+    }
+
+    // 【前提】schedule はnull（新規作成モード）、または既存スケジュールオブジェクト（編集モード）。
+    //   hasChildren は編集対象が子を持つか（子を持つ場合、開始日・終了日は自動計算のため
+    //   読み取り専用にする。基本設計書4.2節）。
+    // 【処理】M4（スケジュール新規作成・編集）モーダルのHTML文字列を組み立てる。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderScheduleModalToHtml(schedule, hasChildren) {
+      const isEditMode = Boolean(schedule);
+      const nameValue = isEditMode ? schedule.name : "";
+      const startDateValue = isEditMode ? schedule.startDate : "";
+      const endDateValue = isEditMode ? schedule.endDate : "";
+      const assigneeValue = isEditMode ? schedule.assignee : "";
+      const taskStatusValue = isEditMode ? schedule.taskStatus : "todo";
+      const notesValue = isEditMode ? schedule.notes : "";
+      const selectedColor = isEditMode && schedule.color ? schedule.color : SCHEDULE_BAR_COLOR_PALETTE[0];
+      const dateDisabledAttribute = hasChildren ? "disabled" : "";
+      const dateHintHtml = hasChildren
+        ? '<p class="empty-state-message" style="padding:0;font-size:11px;">子タスクから自動計算されます</p>'
+        : "";
+
+      const statusOptionsHtml = Object.entries(SCHEDULE_STATUS_LABELS)
+        .map(([value, label]) => `<option value="${value}"${value === taskStatusValue ? " selected" : ""}>${label}</option>`)
+        .join("");
+
+      const colorSwatchesHtml = SCHEDULE_BAR_COLOR_PALETTE
+        .map((color) => `<div class="modal-color-swatch${color === selectedColor ? " is-selected" : ""}" data-color="${color}" style="background:${color}"></div>`)
+        .join("");
+
+      return `
+        <h2>${isEditMode ? "スケジュール編集" : "スケジュール新規作成"}</h2>
+        <div class="modal-field">
+          <label for="scheduleModalNameInput">スケジュール名</label>
+          <input type="text" id="scheduleModalNameInput" value="${escapeHtmlText(nameValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalStartDateInput">開始日</label>
+          <input type="date" id="scheduleModalStartDateInput" value="${escapeHtmlText(startDateValue)}" ${dateDisabledAttribute}>
+          ${dateHintHtml}
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalEndDateInput">終了日</label>
+          <input type="date" id="scheduleModalEndDateInput" value="${escapeHtmlText(endDateValue)}" ${dateDisabledAttribute}>
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalAssigneeInput">担当者</label>
+          <input type="text" id="scheduleModalAssigneeInput" value="${escapeHtmlText(assigneeValue)}">
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalStatusSelect">ステータス</label>
+          <select id="scheduleModalStatusSelect">${statusOptionsHtml}</select>
+        </div>
+        <div class="modal-field">
+          <label>カラー</label>
+          <div class="modal-color-palette" id="scheduleModalColorPalette">${colorSwatchesHtml}</div>
+        </div>
+        <div class="modal-field">
+          <label for="scheduleModalNotesTextarea">メモ</label>
+          <textarea id="scheduleModalNotesTextarea" rows="3">${escapeHtmlText(notesValue)}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="scheduleModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="scheduleModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
+    // 【処理】スケジュールモーダルを開き、キャンセル・保存・カラーパレットの選択にイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openScheduleModal(existingSchedule, hasChildren) {
+      openModal(renderScheduleModalToHtml(existingSchedule, hasChildren));
+      document.getElementById("scheduleModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("scheduleModalSaveButton").addEventListener("click", () => handleScheduleModalSaveButtonClick(existingSchedule));
+      for (const swatch of document.querySelectorAll(".modal-color-swatch")) {
+        swatch.addEventListener("click", () => {
+          for (const otherSwatch of document.querySelectorAll(".modal-color-swatch")) {
+            otherSwatch.classList.remove("is-selected");
+          }
+          swatch.classList.add("is-selected");
+        });
+      }
+    }
+
+    function handleAddScheduleButtonClick() {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
         return;
       }
-      const scheduleName = window.prompt("スケジュール名を入力してください");
-      if (!scheduleName) return;
-      const scheduleStartDate = window.prompt("開始日を入力してください（YYYY-MM-DD）", currentProjectObject?.startDate || "");
-      const scheduleEndDate = window.prompt("終了日を入力してください（YYYY-MM-DD）", scheduleStartDate || "");
-      await addSchedule({
-        id: generateId(),
-        projectId: currentSelectedProjectId,
-        parentId: null,
-        name: scheduleName,
-        startDate: scheduleStartDate || "",
-        endDate: scheduleEndDate || "",
-        assignee: "",
-        taskStatus: "todo",
-        notes: "",
-        color: "#2563EB",
-        order: currentScheduleTreeRows.length,
-      });
+      openScheduleModal(null, false);
+    }
+
+    // 【前提】scheduleId は編集したいスケジュールの id（currentScheduleTreeRowsに含まれること）。
+    // 【処理】WBSパネルの行クリックから呼ばれ、該当スケジュールの編集モーダルを開く
+    //   （モーダル・ダイアログ一覧M4：ガント上の行クリックで編集）。
+    // 【結果】編集モーダルが表示される。
+    function handleWbsRowClick(scheduleId) {
+      const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!targetRow) return;
+      openScheduleModal(targetRow.schedule, targetRow.hasChildren);
+    }
+
+    // 【前提】input は {name, startDate, endDate, hasChildren}（スケジュールモーダルの入力値）。
+    //   子を持つ行は開始日・終了日が自動計算のため、日付のバリデーション自体を行わない。
+    // 【処理】モーダル・ダイアログ一覧A5〜A7のバリデーションを順に判定する（DOMには触れない）。
+    // 【結果】エラーがあればそのアラート文言（string）を、無ければnullを返す。
+    function validateScheduleModalInput(input) {
+      if (!input.name) return "スケジュールを入力してください";
+      if (input.hasChildren) return null;
+      if (!input.startDate || !input.endDate) return "日付を入力してください";
+      if (input.endDate < input.startDate) return "終了日は開始日以降にしてください";
+      return null;
+    }
+
+    // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
+    // 【処理】モーダル内の入力値を読み取り、validateScheduleModalInputでバリデーションし、
+    //   OKならaddScheduleで保存する。子を持つ行は開始日・終了日を既存値のまま維持する
+    //   （手入力欄は読み取り専用にしているため）。
+    //   新規作成後、親を持つ場合はsyncAncestorDatesで祖先の日付を再計算する
+    //   （手入力ではなく子の日付から自動計算される仕様のため、親行を直接作る動線は無いが、
+    //   将来の階層編集機能のために呼び出しておく）。
+    // 【結果】保存成功時はモーダルを閉じ、ガントパネルを更新する。
+    async function handleScheduleModalSaveButtonClick(existingSchedule) {
+      const name = document.getElementById("scheduleModalNameInput").value.trim();
+      const assignee = document.getElementById("scheduleModalAssigneeInput").value.trim();
+      const taskStatus = document.getElementById("scheduleModalStatusSelect").value;
+      const notes = document.getElementById("scheduleModalNotesTextarea").value;
+      const selectedSwatch = document.querySelector(".modal-color-swatch.is-selected");
+      const color = selectedSwatch ? selectedSwatch.dataset.color : SCHEDULE_BAR_COLOR_PALETTE[0];
+
+      const existingRow = existingSchedule ? currentScheduleTreeRows.find((row) => row.schedule.id === existingSchedule.id) : null;
+      const hasChildren = Boolean(existingRow?.hasChildren);
+
+      let startDate = existingSchedule ? existingSchedule.startDate : "";
+      let endDate = existingSchedule ? existingSchedule.endDate : "";
+      if (!hasChildren) {
+        startDate = document.getElementById("scheduleModalStartDateInput").value;
+        endDate = document.getElementById("scheduleModalEndDateInput").value;
+      }
+
+      const validationError = validateScheduleModalInput({ name, startDate, endDate, hasChildren });
+      if (validationError) {
+        window.alert(validationError);
+        return;
+      }
+
+      const scheduleToSave = existingSchedule
+        ? { ...existingSchedule, name, startDate, endDate, assignee, taskStatus, notes, color }
+        : {
+            id: generateId(),
+            projectId: currentSelectedProjectId,
+            parentId: null,
+            name,
+            startDate,
+            endDate,
+            assignee,
+            taskStatus,
+            notes,
+            color,
+            order: currentScheduleTreeRows.length,
+          };
+      await addSchedule(scheduleToSave);
+      if (scheduleToSave.parentId !== null && scheduleToSave.parentId !== undefined) {
+        await syncAncestorDates(scheduleToSave.parentId);
+      }
+      closeModal();
       await refreshGanttPanel(currentSelectedProjectId);
     }
 
-    async function handleAddTaskButtonClick() {
+    // ===== UI：その他のイベントハンドラ =====
+    // 【設計判断】issuesの追加は今回スコープの手前でprompt()ベースの最小限のまま据え置く
+    //   （マインドマップのスライドパネル化自体を今回は見送っているため）。
+
+    // 【前提】formElement は「.kanban-add-form」要素（data-column-status属性でstatus値を持つ）。
+    // 【処理】埋め込みフォームの入力値を読み取り、タスク名が空でなければaddTaskで保存する
+    //   （モーダル・ダイアログ一覧P1：モーダルを介さずその場で追加）。
+    // 【結果】保存後、カンバンパネルを再描画する（入力欄は再描画により自動的に空になる）。
+    async function handleKanbanAddFormSubmit(formElement) {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
         return;
       }
-      const taskTitle = window.prompt("タスクのタイトルを入力してください");
-      if (!taskTitle) return;
+      const title = formElement.querySelector(".kanban-add-title-input").value.trim();
+      if (!title) {
+        window.alert("タスク名を入力してください");
+        return;
+      }
+      const priority = Number(formElement.querySelector(".kanban-add-priority-select").value);
+      const dueDate = formElement.querySelector(".kanban-add-duedate-input").value;
+      const columnStatus = formElement.dataset.columnStatus;
       await addTask({
         id: generateId(),
         projectId: currentSelectedProjectId,
-        title: taskTitle,
-        status: "backlog",
-        done: false,
-        doneAt: null,
-        priority: 4,
-        dueDate: "",
+        title,
+        status: columnStatus,
+        done: columnStatus === "done",
+        doneAt: columnStatus === "done" ? new Date().toISOString() : null,
+        priority,
+        dueDate,
         description: "",
         order: 0,
       });
@@ -1944,7 +2572,20 @@
       if (!currentTimelineStartDateString) return;
       const todayDateString = new Date().toISOString().slice(0, 10);
       const dayOffset = calculateDayOffsetFromTimelineStart(todayDateString, currentTimelineStartDateString);
-      document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * PIXELS_PER_DAY - 100, 0);
+      const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
+      document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * pixelsPerDay - 100, 0);
+    }
+
+    // 【前提】granularity は "day" | "week" | "month" | "quarter"。buttonElement はクリックされたボタン。
+    // 【処理】表示粒度を切り替え、ボタンの選択状態を更新した上でガントパネルを再描画する
+    //   （DBへの再問い合わせは不要。currentProjectObjectの日付情報だけで再計算できるため）。
+    // 【結果】ガントチャートが新しい粒度の見出し・列幅で再描画される。
+    function handleGranularityButtonClick(granularity, buttonElement) {
+      currentGranularity = granularity;
+      for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
+        granularityButton.classList.toggle("is-active", granularityButton === buttonElement);
+      }
+      refreshGanttPanel(currentSelectedProjectId);
     }
 
     // 【前提】columnKey は "startDate" | "endDate" | "status"。buttonElement はクリックされたボタン。
@@ -1959,12 +2600,17 @@
     }
 
     // 【前提】なし。
-    // 【処理】現在のビューが対象ビューなら「ガント」へ戻し、そうでなければ対象ビューへ切り替える
-    //   （ヘッダーの「マインドマップ」「タスク管理」ボタンは、仕様書に明記の無いトグル的な
-    //   挙動として、もう一度押すとガントに戻る形にした＝今回の判断ポイント）。
-    // 【結果】メインビューが切り替わる。
+    // 【処理】タスク管理（P1）は右側スライドパネルの開閉トグル（toggleSlidePanel）。
+    //   マインドマップはまだ旧方式のまま、現在のビューが対象ビューなら「ガント」へ戻し、
+    //   そうでなければ対象ビューへ切り替える（仕様書に明記の無いトグル的な挙動として、
+    //   もう一度押すとガントに戻る形にした＝今回の判断ポイント。P7スライドパネル化は別工程）。
+    // 【結果】タスク管理パネルの開閉、またはメインビューの切り替えが行われる。
     function handleSwitchToKanbanButtonClick() {
-      switchMainView(currentMainView === "kanban" ? "gantt" : "kanban");
+      toggleSlidePanel("kanbanSlidePanel");
+      document.getElementById("switchToKanbanButton").classList.toggle(
+        "is-active",
+        document.getElementById("kanbanSlidePanel").classList.contains("is-open")
+      );
     }
     function handleSwitchToMindmapButtonClick() {
       switchMainView(currentMainView === "mindmap" ? "gantt" : "mindmap");
@@ -1990,10 +2636,23 @@
       });
       document.getElementById("createProjectButton").addEventListener("click", handleCreateProjectButtonClick);
       document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
-      document.getElementById("addTaskButton").addEventListener("click", handleAddTaskButtonClick);
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
+      document.getElementById("closeKanbanPanelButton").addEventListener("click", () => {
+        closeSlidePanel("kanbanSlidePanel");
+        document.getElementById("switchToKanbanButton").classList.remove("is-active");
+      });
+      // カンバンの埋め込み追加フォームはkanbanPanelBodyのinnerHTMLごと再生成されるため、
+      // 個々のボタンではなく親要素にイベント委譲する。
+      document.getElementById("kanbanPanelBody").addEventListener("click", (event) => {
+        const submitButton = event.target.closest(".kanban-add-submit-button");
+        if (!submitButton) return;
+        handleKanbanAddFormSubmit(submitButton.closest(".kanban-add-form"));
+      });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
+        granularityButton.addEventListener("click", () => handleGranularityButtonClick(granularityButton.dataset.granularity, granularityButton));
+      }
       document.getElementById("toggleColumnStartDateButton").addEventListener("click", (event) => handleToggleColumnClick("startDate", event.currentTarget));
       document.getElementById("toggleColumnEndDateButton").addEventListener("click", (event) => handleToggleColumnClick("endDate", event.currentTarget));
       document.getElementById("toggleColumnStatusButton").addEventListener("click", (event) => handleToggleColumnClick("status", event.currentTarget));
@@ -2002,6 +2661,19 @@
       for (const outOfScopeButton of document.querySelectorAll("[data-out-of-scope-label]")) {
         outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
       }
+      document.getElementById("editProjectButton").addEventListener("click", handleEditProjectButtonClick);
+      // モーダル外側（オーバーレイ自身）をクリックしたときだけ閉じる
+      // （モーダル・ダイアログ一覧2.3節：「モーダル外側をクリックすると閉じる」）。
+      document.getElementById("modalOverlay").addEventListener("click", (event) => {
+        if (event.target.id === "modalOverlay") closeModal();
+      });
+      // WBSパネルの行クリックでスケジュール編集モーダルを開く（イベント委譲。
+      // wbsPanelの中身はrefreshGanttPanelのたびに丸ごと再生成されるため、個々の行ではなく
+      // 親要素にリスナーを1つだけ持たせる）。
+      document.getElementById("wbsPanel").addEventListener("click", (event) => {
+        const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
+        if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
+      });
 
       const projectList = await getAllProjects();
       await refreshProjectSelectDropdown();
