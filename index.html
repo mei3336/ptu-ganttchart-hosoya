@@ -133,6 +133,153 @@
         //   起きないため発生しない。将来バージョンを上げる際に、ここへハンドラを追加する。
       });
     }
+
+    // ===== DB接続の共通処理 =====
+
+    // 開いたDB接続をキャッシュする変数。操作のたびに openDB() すると接続コストがかかるため、
+    // 初回だけ開いて以後は同じ接続を使い回す（初期値 null ＝まだ一度も開いていない）。
+    let cachedDatabase = null;
+
+    // 【前提】openDB() が9ストアを持つDBを開けること。
+    // 【処理】初回呼び出し時だけ openDB() でDBを開いてキャッシュし、2回目以降は同じ接続を返す。
+    // 【結果】開いている IDBDatabase を1つ返すことを保証する（毎回同じインスタンス）。
+    async function getDB() {
+      if (cachedDatabase === null) {
+        cachedDatabase = await openDB();
+      }
+      return cachedDatabase;
+    }
+
+    // 【前提】request は store.put / getAll / delete / index.getAll 等が返した IDBRequest。
+    //   transaction は、その request を発行したトランザクション（呼び出し側が保持しているものを渡す）。
+    //   （indexedDB.open の要求には使わない。あちらは onupgradeneeded を挟むため openDB 側で個別に扱う）。
+    // 【なぜ transaction を引数で受け取るのか】request.transaction から辿る手もあるが、
+    //   index.getAll() が返す request では実装によって transaction が取れないことがある（可搬性リスク）。
+    //   呼び出し側は必ず自分でトランザクションを作っているので、それを明示的に渡す方が確実で読みやすい。
+    // 【処理】IndexedDBのイベントコールバックを Promise に橋渡しする。ここでの設計判断は
+    //   「リクエスト成功(onsuccess)」ではなく「トランザクション完了(oncomplete)」で resolve する点。
+    //   put/delete は onsuccess の時点ではまだコミット前で、コミット後に初めて保存が確定するため、
+    //   commit を待ってから resolve することで「Promiseの解決＝保存済み」を保証する。
+    //   取得系(getAll)も同じ仕組みでよく、結果値は onsuccess でいったん控えて oncomplete で返す。
+    // 【結果】成功時：request.result を resolve。失敗時：発生したエラーを reject。
+    function promisifyRequest(request, transaction) {
+      return new Promise((resolve, reject) => {
+        let requestResult;
+        request.onsuccess = () => { requestResult = request.result; };
+        // 【何が起きたら】リクエスト自体が失敗したとき（キー制約違反、値の型不正など）。
+        // 【どう対応するか】エラーを reject し、通知やリトライは呼び出し側の責務とする。
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => resolve(requestResult);
+        // 【何が起きたら】トランザクションが中断(abort)されたとき（commitされず保存が無効になる）。
+        // 【どう対応するか】保存が確定していないため、エラーを reject する。
+        transaction.onabort = () => reject(transaction.error);
+      });
+    }
+
+    // ===== projects ストアのCRUD =====
+
+    // projects の操作対象ストア名。ストア名の打ち間違いを1箇所に閉じ込める
+    // （STORE_DEFINITIONS 内の "projects" と同じ値を指す）。
+    const STORE_PROJECTS = "projects";
+
+    // 【前提】project は id を含む1件分のプロジェクトオブジェクト（id は呼び出し側で採番済み）。
+    //   この関数では id 採番・入力バリデーションは行わない（1関数1責務。採番は別工程の共通関数の責務）。
+    // 【処理】読み書きトランザクションで projects ストアに put する。
+    //   put を使う理由：「同じidがあれば上書き、なければ新規」なので、将来のインポートや
+    //   「戻す」機能でも同じ関数を再利用でき、追加と復元を1つの経路にまとめられるため。
+    // 【結果】コミット完了後に resolve する（＝保存が確定したことを保証）。
+    async function addProject(project) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_PROJECTS, "readwrite");
+      const store = transaction.objectStore(STORE_PROJECTS);
+      return promisifyRequest(store.put(project), transaction);
+    }
+
+    // 【前提】projects ストアが存在すること。
+    // 【処理】読み取りトランザクションで全プロジェクトを取得する。
+    //   projects はインデックスを持たない設計（データモデル設計3.1節）のため、絞り込みではなく
+    //   常に getAll で全件を取る（プロジェクト選択ドロップダウンは常に全件表示するため）。
+    // 【結果】プロジェクトの配列を resolve する（0件なら空配列）。
+    async function getAllProjects() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_PROJECTS, "readonly");
+      const store = transaction.objectStore(STORE_PROJECTS);
+      return promisifyRequest(store.getAll(), transaction);
+    }
+
+    // 【前提】projectId は削除したいプロジェクトの id。
+    // 【処理】読み書きトランザクションで projects ストアから該当1件を削除する。
+    //   ※配下データ（schedules 等）の連鎖削除はここでは行わない（別工程。データモデル設計6章の方針）。
+    // 【結果】コミット完了後に resolve する（対象が存在しなくても delete はエラーにならない＝冪等）。
+    async function deleteProject(projectId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_PROJECTS, "readwrite");
+      const store = transaction.objectStore(STORE_PROJECTS);
+      return promisifyRequest(store.delete(projectId), transaction);
+    }
+
+    // ===== schedules ストアのCRUD =====
+
+    // schedules の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
+    // （いずれも STORE_DEFINITIONS の schedules 定義と同じ値を指す）。
+    const STORE_SCHEDULES = "schedules";
+    const INDEX_SCHEDULES_BY_PROJECT = "by_projectId";
+    const INDEX_SCHEDULES_BY_PARENT = "by_parentId";
+
+    // 【前提】schedule は id を含む1件分のスケジュールオブジェクト（id は呼び出し側で採番済み）。
+    //   日付の整合（endDate < startDate はエラー）などのバリデーションはここでは行わない
+    //   （データモデル設計6章：バリデーションはフォーム送信層の責務。addProject と一貫させる）。
+    // 【処理】読み書きトランザクションで schedules ストアに put する（upsert。理由は addProject と同じ）。
+    // 【結果】コミット完了後に resolve する（＝保存が確定したことを保証）。
+    async function addSchedule(schedule) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SCHEDULES, "readwrite");
+      const store = transaction.objectStore(STORE_SCHEDULES);
+      return promisifyRequest(store.put(schedule), transaction);
+    }
+
+    // 【前提】projectId は絞り込みたいプロジェクトの id。
+    // 【処理】by_projectId インデックスを使い、そのプロジェクトに属するスケジュールを全て取得する
+    //   （プロジェクト切替のたびに一覧を取り直すため）。
+    // 【結果】スケジュールの配列を resolve する（0件なら空配列）。ルート行・子行の区別はせず全行を返す。
+    //   ※「ルート行だけ欲しい」場合は、この結果をアプリ層で parentId === null で絞る。
+    //     ルート行は parentId が null のため by_parentId インデックスには載らず、インデックスでは取れないため。
+    async function getSchedulesByProject(projectId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SCHEDULES, "readonly");
+      const index = transaction.objectStore(STORE_SCHEDULES).index(INDEX_SCHEDULES_BY_PROJECT);
+      return promisifyRequest(index.getAll(projectId), transaction);
+    }
+
+    // 【前提】parentId は「具体的な親スケジュールの id」であること。
+    //   null / undefined を渡してはいけない：getAll に null を渡すと「キー指定なし＝全件」と解釈され、
+    //   インデックス上の全子行が返ってしまう（ルート行だけが返るわけではない）。呼び出し側で保証する。
+    // 【処理】by_parentId インデックスを使い、その親の直下の子スケジュールを全て取得する
+    //   （階層表示や、子の日付から親の期間を再計算する処理の入力として使う）。
+    // 【結果】子スケジュールの配列を resolve する（子がなければ空配列）。
+    //   ※ルート行（parentId: null）はこのインデックスに載らないため、この関数では取得できない。
+    //     ルート行はプロジェクト単位で取ってアプリ層で絞る（getSchedulesByProject のコメント参照）。
+    async function getChildSchedules(parentId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SCHEDULES, "readonly");
+      const index = transaction.objectStore(STORE_SCHEDULES).index(INDEX_SCHEDULES_BY_PARENT);
+      return promisifyRequest(index.getAll(parentId), transaction);
+    }
+
+    // 【前提】scheduleId は削除したいスケジュールの id。
+    // 【処理】schedules ストアから該当1件“だけ”を削除する低レベル部品。
+    //   ※アプリの「スケジュール削除」操作は、仕様上この1件では終わらない：
+    //     親を消すと子・孫も再帰削除し、紐づくコメントも削除し、祖先の日付を再計算する
+    //     （基本設計書 L155-157・L200 / シーケンス図集「3. 親スケジュール削除」）。
+    //     これは schedules / comments / changelog にまたがるため、子孫idを先に集めてから書き込む
+    //     上位操作として別に実装し、この関数はその部品として使う（データモデル設計6章：読み切ってから書く）。
+    // 【結果】コミット完了後に resolve する（対象が存在しなくても delete はエラーにならない＝冪等）。
+    async function deleteSchedule(scheduleId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SCHEDULES, "readwrite");
+      const store = transaction.objectStore(STORE_SCHEDULES);
+      return promisifyRequest(store.delete(scheduleId), transaction);
+    }
   </script>
 </body>
 </html>
