@@ -531,6 +531,58 @@
       white-space: nowrap;
       box-shadow: var(--shadow-small);
       transform: translate(-50%, -50%);
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .mindmap-node.is-dragging {
+      cursor: grabbing;
+      opacity: .85;
+      z-index: 10;
+    }
+
+    /* 折りたたみ中（子孫ノードを非表示にしている）ノードの見た目の目印。 */
+    .mindmap-node.is-collapsed-node {
+      border: 2px dashed var(--color-white);
+    }
+
+    /* マインドマップは他パネルよりノード配置の作業領域が必要なため、幅を広めにする。 */
+    .mindmap-slide-panel {
+      width: 900px;
+    }
+
+    /* 右クリックメニュー（モーダル・ダイアログ一覧P7）。位置はJSでtop/leftを指定する。 */
+    .mindmap-context-menu {
+      position: fixed;
+      z-index: 110;
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-medium);
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      min-width: 180px;
+    }
+
+    .mindmap-context-menu[hidden] {
+      display: none;
+    }
+
+    .mindmap-context-menu button {
+      text-align: left;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 4px;
+      background: none;
+      color: var(--color-text-dark);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .mindmap-context-menu button:hover {
+      background: var(--color-primary-light);
     }
 
     .panel-add-button {
@@ -934,10 +986,6 @@
         </div>
       </div>
     </section>
-    <section id="mindmapPanel" hidden>
-      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
-      <div id="mindmapPanelBody"></div>
-    </section>
   </main>
 
   <!-- モーダル・ダイアログ一覧②：右側スライドパネル（P1タスク管理）。ガント画面の上に
@@ -1021,6 +1069,28 @@
       <div id="changelogPanelBody"></div>
     </div>
   </aside>
+
+  <!-- P7：マインドマップ。ノードのドラッグ配置・右クリックメニュー（名前変更/子追加/兄弟追加/
+       折りたたみ/削除）に対応。他パネルより横幅が必要なため広めにする（CSSで個別指定）。 -->
+  <aside id="mindmapSlidePanel" class="slide-panel mindmap-slide-panel">
+    <div class="slide-panel-header">
+      <h2>マインドマップ</h2>
+      <button type="button" id="closeMindmapPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
+      <div id="mindmapPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- マインドマップの右クリックメニュー。位置はJSで動的にtop/leftを指定する。 -->
+  <div id="mindmapContextMenu" class="mindmap-context-menu" hidden>
+    <button type="button" data-action="rename">名前を変更 (F2)</button>
+    <button type="button" data-action="add-child">子ノード追加 (Tab)</button>
+    <button type="button" data-action="add-sibling">兄弟ノード追加 (Enter)</button>
+    <button type="button" data-action="toggle-collapse">折りたたみ (Space)</button>
+    <button type="button" data-action="delete">削除 (Del)</button>
+  </div>
 
   <!-- モーダル・ダイアログ一覧①：中央モーダルの共通の入れ物。中身はopenModal()で差し替える。 -->
   <div id="modalOverlay" class="modal-overlay" hidden>
@@ -1797,6 +1867,8 @@
     //   ・parentNodeId にインデックスが無いため、子孫収集は getIssuesByProject の結果を
     //     アプリ層でツリー走査する（issues側のCRUD設計方針と同じ理由）
     //   なお issues は LOGGED_STORES に含まれるため、schedules と同様に個別の削除ログを残す。
+    //   子孫id収集はcollectIssueSubtreeIds（折りたたみ機能と共通）に委譲し、ここで
+    //   ツリー走査ロジックを重複させない。
     //
     // 【前提】issueId は削除起点のノード id。projectId は所属プロジェクトの id。
     // 【処理】起点＋全子孫ノードを収集し、それぞれ削除・削除ログ記録を行う。
@@ -1804,30 +1876,11 @@
     async function deleteIssueCascade(issueId, projectId) {
       const allIssues = await getIssuesByProject(projectId);
       const issueById = new Map(allIssues.map((issue) => [issue.id, issue]));
-      const targetIssue = issueById.get(issueId);
-      if (!targetIssue) {
+      if (!issueById.has(issueId)) {
         return [];
       }
 
-      const childIssuesByParentNodeId = new Map();
-      for (const issue of allIssues) {
-        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
-        if (!childIssuesByParentNodeId.has(issue.parentNodeId)) {
-          childIssuesByParentNodeId.set(issue.parentNodeId, []);
-        }
-        childIssuesByParentNodeId.get(issue.parentNodeId).push(issue);
-      }
-
-      const idsToDelete = [];
-      let frontier = [targetIssue];
-      while (frontier.length > 0) {
-        const nextFrontier = [];
-        for (const node of frontier) {
-          idsToDelete.push(node.id);
-          nextFrontier.push(...(childIssuesByParentNodeId.get(node.id) || []));
-        }
-        frontier = nextFrontier;
-      }
+      const idsToDelete = collectIssueSubtreeIds(allIssues, issueId);
 
       for (const id of idsToDelete) {
         const issue = issueById.get(id);
@@ -1880,10 +1933,11 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
+    // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
+    // DB非保存の画面上だけの一時状態にする。
+    const collapsedMindmapIssueIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
-    // 現在表示中のメインビュー（"gantt" | "kanban" | "mindmap"）。
-    let currentMainView = "gantt";
 
     // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
     const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
@@ -2098,6 +2152,53 @@
           leftPx: calculateDayOffsetFromTimelineStart(milestone.date, timelineStartDateString) * pixelsPerDay,
           name: milestone.name,
         }));
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件。rootIssueId は起点ノードのid。
+    // 【処理】parentNodeIdをたどり、rootIssueId自身を含む子孫issueのidを幅優先で収集する
+    //   （issuesにはparentNodeIdのインデックスが無いため、getIssuesByProjectで読み切った
+    //   全件をアプリ層で辿る。deleteIssueCascade・折りたたみ機能の両方で使う共通ロジック）。
+    // 【結果】[rootIssueId, ...子孫id...] の配列を返す。
+    function collectIssueSubtreeIds(issueList, rootIssueId) {
+      const childIssuesByParentNodeId = new Map();
+      for (const issue of issueList) {
+        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
+        if (!childIssuesByParentNodeId.has(issue.parentNodeId)) {
+          childIssuesByParentNodeId.set(issue.parentNodeId, []);
+        }
+        childIssuesByParentNodeId.get(issue.parentNodeId).push(issue);
+      }
+
+      const collectedIds = [];
+      let frontier = [rootIssueId];
+      while (frontier.length > 0) {
+        const nextFrontier = [];
+        for (const id of frontier) {
+          collectedIds.push(id);
+          const childIssues = childIssuesByParentNodeId.get(id) || [];
+          nextFrontier.push(...childIssues.map((childIssue) => childIssue.id));
+        }
+        frontier = nextFrontier;
+      }
+      return collectedIds;
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件。collapsedIssueIds は
+    //   折りたたまれているissueidの集合（Set）。
+    // 【処理】折りたたまれた各ノードについて、collectIssueSubtreeIdsで子孫id（自身は除く）を
+    //   集めて非表示集合にまとめ、issueListからそれらを除外する。
+    // 【結果】実際に画面へ表示すべきissueだけの配列を返す。
+    function filterVisibleIssues(issueList, collapsedIssueIds) {
+      if (collapsedIssueIds.size === 0) return issueList;
+      const hiddenIssueIds = new Set();
+      for (const collapsedIssueId of collapsedIssueIds) {
+        for (const descendantId of collectIssueSubtreeIds(issueList, collapsedIssueId)) {
+          if (descendantId !== collapsedIssueId) {
+            hiddenIssueIds.add(descendantId);
+          }
+        }
+      }
+      return issueList.filter((issue) => !hiddenIssueIds.has(issue.id));
     }
 
     // 【前提】issueList は同一プロジェクト内のissue全件（親子関係はparentNodeIdで表現）。
@@ -2502,25 +2603,35 @@
       </div>`;
     }
 
-    // 【前提】issueList は同一プロジェクト内のissue全件（x,y座標を持つ）。
-    // 【処理】issue.x/yをそのまま絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、
-    //   親子を結ぶ線（buildMindmapEdgeList・calculateEdgeGeometry）を組み立てる
-    //   （座標配置のドラッグ操作自体は今回のスコープ外。静的な配置表示のみ）。
+    // 【前提】issueList は同一プロジェクト内のissue全件（折りたたみ状態に関係なく常に全件、
+    //   x,y座標を持つ）。collapsedIssueIds は折りたたまれているissueidの集合。
+    // 【処理】filterVisibleIssuesで実際に表示する行を絞り込んでから、issue.x/yをそのまま
+    //   絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、親子を結ぶ線
+    //   （buildMindmapEdgeList・calculateEdgeGeometry。辺も絞り込み後のissueListから
+    //   計算するため、隠れた子ノードへの辺は自動的に描画されない）を組み立てる。
+    //   各ノードにdata-issue-idを持たせ、ドラッグ配置・右クリックメニューの対象特定に使う。
+    //   子を持つノードには「▸ 」を名前の前に付け、折りたたみ中はis-collapsed-nodeクラスで
+    //   見た目の目印を付ける。
     // 【結果】マインドマップキャンバスのHTML文字列を返す。
-    function renderMindmapCanvasToHtml(issueList) {
-      if (issueList.length === 0) {
+    function renderMindmapCanvasToHtml(issueList, collapsedIssueIds) {
+      const visibleIssues = filterVisibleIssues(issueList, collapsedIssueIds);
+      if (visibleIssues.length === 0) {
         return '<p class="empty-state-message">マインドマップノードがありません。</p>';
       }
-      const edgesHtml = buildMindmapEdgeList(issueList)
+      const edgesHtml = buildMindmapEdgeList(visibleIssues)
         .map(({ fromIssue, toIssue }) => {
           const geometry = calculateEdgeGeometry(fromIssue.x, fromIssue.y, toIssue.x, toIssue.y);
           return `<div class="mindmap-edge" style="left:${geometry.leftPx}px;top:${geometry.topPx}px;width:${geometry.widthPx}px;transform:rotate(${geometry.angleDeg}deg)"></div>`;
         })
         .join("");
-      const nodesHtml = issueList
+      const nodesHtml = visibleIssues
         .map((issue) => {
           const backgroundColor = issue.color || MINDMAP_NODE_COLORS[0];
-          return `<div class="mindmap-node" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${escapeHtmlText(issue.title)}</div>`;
+          const hasChildren = issueList.some((candidateChild) => candidateChild.parentNodeId === issue.id);
+          const isCollapsed = collapsedIssueIds.has(issue.id);
+          const collapsedClass = isCollapsed ? " is-collapsed-node" : "";
+          const collapsedIndicator = hasChildren && isCollapsed ? "▸ " : "";
+          return `<div class="mindmap-node${collapsedClass}" data-issue-id="${escapeHtmlText(issue.id)}" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${collapsedIndicator}${escapeHtmlText(issue.title)}</div>`;
         })
         .join("");
       return `<div class="mindmap-canvas">${edgesHtml}${nodesHtml}</div>`;
@@ -3069,7 +3180,7 @@
         return;
       }
       const issueList = await getIssuesByProject(projectId);
-      applyMindmapPanel(renderMindmapCanvasToHtml(issueList));
+      applyMindmapPanel(renderMindmapCanvasToHtml(issueList, collapsedMindmapIssueIds));
     }
 
     // 【前提】projectId はnull、または実在するプロジェクトのid。
@@ -3091,24 +3202,6 @@
         refreshKanbanPanel(currentSelectedProjectId),
         refreshMindmapPanel(currentSelectedProjectId),
       ]);
-    }
-
-    // 【設計判断：タスク管理(P1)は右側スライドパネル化したがマインドマップ(P7)はまだ未着手】
-    //   モーダル・ダイアログ一覧の訂正指示どおり、第2ヘッダー右側の7機能は本来すべて
-    //   ②右側スライドパネルであるべきだが、今回はP1（タスク管理）のみをスライドパネルへ
-    //   作り直した。マインドマップは旧方式（ガントと排他的に表示を切り替える）のまま
-    //   据え置いている（時間都合により別工程）。そのため switchMainView は
-    //   "gantt" | "mindmap" の2値のみを扱う（"kanban"はここでは扱わない）。
-    //
-    // 【前提】viewName は "gantt" | "mindmap" のいずれか。
-    // 【処理】該当するセクションだけを表示し、他は隠す。ヘッダー右側の「マインドマップ」
-    //   ボタンの選択状態も合わせて切り替える。データの再取得は行わない。
-    // 【結果】指定したビューだけが画面に表示される。
-    function switchMainView(viewName) {
-      currentMainView = viewName;
-      document.getElementById("ganttPanel").hidden = viewName !== "gantt";
-      document.getElementById("mindmapPanel").hidden = viewName !== "mindmap";
-      document.getElementById("switchToMindmapButton").classList.toggle("is-active", viewName === "mindmap");
     }
 
     // 【前提】panelId はスライドパネル要素のid（例："kanbanSlidePanel"）。
@@ -3701,7 +3794,8 @@
       }
       const issueTitle = window.prompt("ノードのタイトルを入力してください");
       if (!issueTitle) return;
-      // 新規ノードが重ならないよう、ある程度ばらけた座標に配置する（ドラッグでの手動配置は今回スコープ外）。
+      // 新規ノードが重ならないよう、ある程度ばらけた座標に配置する
+      // （初期配置のみランダム。配置後はドラッグで自由に動かせる＝下記の一連のハンドラ）。
       const randomX = Math.round(80 + Math.random() * 320);
       const randomY = Math.round(60 + Math.random() * 300);
       const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
@@ -3716,6 +3810,222 @@
         order: 0,
       });
       await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // ===== マインドマップ：ノードのドラッグ配置 =====
+    // 【設計判断】ノードの自由な2次元配置の変更は、HTML5のdraggable属性（discreteな
+    //   ドロップ先を前提とするAPIで、WBS行の並び替えのような「入れ替え」向き）ではなく、
+    //   pointerdown/pointermove/pointerupで座標を直接計算する方式にする。
+    //   ドラッグ中は見た目（left/top）だけを更新し、DBへの保存はpointerup時の1回だけ行う
+    //   （ドラッグ中に毎回addIssueするのは書き込み回数・再描画の面で無駄なため）。
+
+    // ドラッグ中のノードのissueId。ドラッグしていない時はnull。
+    let draggedMindmapIssueId = null;
+    let mindmapDragStartPointerX = 0;
+    let mindmapDragStartPointerY = 0;
+    let mindmapDragStartNodeX = 0;
+    let mindmapDragStartNodeY = 0;
+    // これ未満の移動量は「クリック」とみなし、座標の保存を行わない（誤操作での無駄な書き込み防止）。
+    const MINDMAP_DRAG_THRESHOLD_PX = 3;
+
+    // 【前提】event はmindmap-node要素上でのpointerdownイベント。issueId はそのノードのid。
+    //   nodeElement はイベントが発生した実際のDOM要素。
+    // 【処理】ドラッグ開始時点のポインタ座標・ノード座標を記録する（以降のpointermoveで
+    //   差分計算するための基準点）。
+    // 【結果】ドラッグ状態が開始される（実際の座標更新はpointermoveハンドラが行う）。
+    function handleMindmapNodePointerDown(event, issueId, nodeElement) {
+      draggedMindmapIssueId = issueId;
+      mindmapDragStartPointerX = event.clientX;
+      mindmapDragStartPointerY = event.clientY;
+      mindmapDragStartNodeX = parseFloat(nodeElement.style.left) || 0;
+      mindmapDragStartNodeY = parseFloat(nodeElement.style.top) || 0;
+      nodeElement.classList.add("is-dragging");
+      nodeElement.setPointerCapture(event.pointerId);
+    }
+
+    // 【前提】draggedMindmapIssueIdが設定済み（ドラッグ中）であること。
+    // 【処理】ポインタの移動量ぶん、ドラッグ中ノードのleft/topスタイルを直接書き換える。
+    //   DBへの保存はしない（見た目だけをポインタに追従させる）。
+    // 【結果】ノードが視覚的にポインタへ追従する。
+    function handleMindmapNodePointerMove(event) {
+      if (!draggedMindmapIssueId) return;
+      const nodeElement = document.querySelector(`.mindmap-node[data-issue-id="${draggedMindmapIssueId}"]`);
+      if (!nodeElement) return;
+      const deltaX = event.clientX - mindmapDragStartPointerX;
+      const deltaY = event.clientY - mindmapDragStartPointerY;
+      nodeElement.style.left = `${mindmapDragStartNodeX + deltaX}px`;
+      nodeElement.style.top = `${mindmapDragStartNodeY + deltaY}px`;
+    }
+
+    // 【前提】ドラッグ中であること。
+    // 【処理】移動量がMINDMAP_DRAG_THRESHOLD_PX未満なら「クリック」とみなし何もしない。
+    //   それ以上動いていれば、最終的なleft/topをissueのx/yとしてaddIssueで保存する
+    //   （辺の再描画はrefreshMindmapPanelに任せる）。
+    // 【結果】ノードの新しい座標がDBに保存され、パネルが再描画される。
+    async function handleMindmapNodePointerUp(event) {
+      if (!draggedMindmapIssueId) return;
+      const issueId = draggedMindmapIssueId;
+      draggedMindmapIssueId = null;
+      const nodeElement = document.querySelector(`.mindmap-node[data-issue-id="${issueId}"]`);
+      if (!nodeElement) return;
+      nodeElement.classList.remove("is-dragging");
+
+      const deltaX = event.clientX - mindmapDragStartPointerX;
+      const deltaY = event.clientY - mindmapDragStartPointerY;
+      if (Math.abs(deltaX) < MINDMAP_DRAG_THRESHOLD_PX && Math.abs(deltaY) < MINDMAP_DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      const newX = Math.round(mindmapDragStartNodeX + deltaX);
+      const newY = Math.round(mindmapDragStartNodeY + deltaY);
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const existingIssue = issueList.find((issue) => issue.id === issueId);
+      if (!existingIssue) return;
+      await addIssue({ ...existingIssue, x: newX, y: newY });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // ===== マインドマップ：右クリックメニュー =====
+    // 【設計判断】メニューはDOM上に1つだけ常設し（#mindmapContextMenu）、開くたびに
+    //   表示位置（クリック位置）とcurrentContextMenuIssueId（対象ノード）を差し替える。
+    //   モーダルと同じ「入れ物を使い回す」設計に揃えている。
+
+    // 現在メニューが開いている対象ノードのissueId。閉じている間はnull。
+    let currentContextMenuIssueId = null;
+
+    // 【前提】issueId は右クリックされたノードのid。clientX/clientY はイベント発生位置。
+    // 【処理】メニューを対象ノードのidと紐づけて、クリックされた座標に表示する。
+    // 【結果】右クリックメニューが画面上に表示される。
+    function openMindmapContextMenu(issueId, clientX, clientY) {
+      currentContextMenuIssueId = issueId;
+      const menuElement = document.getElementById("mindmapContextMenu");
+      menuElement.style.left = `${clientX}px`;
+      menuElement.style.top = `${clientY}px`;
+      menuElement.hidden = false;
+    }
+
+    // 【前提】なし。
+    // 【処理】メニューを非表示にし、対象ノードの紐づけを解除する。
+    // 【結果】右クリックメニューが閉じる。
+    function closeMindmapContextMenu() {
+      currentContextMenuIssueId = null;
+      document.getElementById("mindmapContextMenu").hidden = true;
+    }
+
+    // 【前提】issueId は名前を変更したいノードのid。
+    // 【処理】prompt()で新しい名前を受け取り、空でなければaddIssueで保存する
+    //   （モーダル・ダイアログ一覧P7：右クリックメニュー「名前を変更」に対応）。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleRenameIssueButtonClick(issueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const existingIssue = issueList.find((issue) => issue.id === issueId);
+      if (!existingIssue) return;
+      const newTitle = window.prompt("新しいノード名を入力してください", existingIssue.title);
+      if (!newTitle) return;
+      await addIssue({ ...existingIssue, title: newTitle });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】parentIssueId は子ノードを追加したい親ノードのid。
+    // 【処理】parentNodeIdをparentIssueIdに固定した新規ノードを、親の近くの座標に作成する
+    //   （モーダル・ダイアログ一覧P7：右クリックメニュー「子ノード追加」に対応）。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleAddChildIssueButtonClick(parentIssueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const parentIssue = issueList.find((issue) => issue.id === parentIssueId);
+      if (!parentIssue) return;
+      const childTitle = window.prompt("子ノードのタイトルを入力してください");
+      if (!childTitle) return;
+      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
+      await addIssue({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: childTitle,
+        parentNodeId: parentIssueId,
+        x: parentIssue.x + 120,
+        y: parentIssue.y + 60,
+        color: MINDMAP_NODE_COLORS[colorIndex],
+        order: 0,
+      });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】siblingIssueId は兄弟ノードを追加したい基準ノードのid。
+    // 【処理】siblingIssueIdと同じparentNodeIdを持つ新規ノードを、基準ノードの近くの座標に
+    //   作成する（モーダル・ダイアログ一覧P7：右クリックメニュー「兄弟ノード追加」に対応）。
+    //   基準ノードがルート（parentNodeId:null）の場合は、新規ノードもルートとして作る。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleAddSiblingIssueButtonClick(siblingIssueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const siblingIssue = issueList.find((issue) => issue.id === siblingIssueId);
+      if (!siblingIssue) return;
+      const newTitle = window.prompt("兄弟ノードのタイトルを入力してください");
+      if (!newTitle) return;
+      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
+      await addIssue({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: newTitle,
+        parentNodeId: siblingIssue.parentNodeId,
+        x: siblingIssue.x,
+        y: siblingIssue.y + 80,
+        color: MINDMAP_NODE_COLORS[colorIndex],
+        order: 0,
+      });
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】action は右クリックメニューのdata-action値（"rename"|"add-child"|"add-sibling"|
+    //   "toggle-collapse"|"delete"）。currentContextMenuIssueIdがメニューを開いた時点の
+    //   対象ノードを保持している。
+    // 【処理】メニューを閉じてから、actionに応じた処理へ委譲する。
+    // 【結果】選択した操作が実行される。
+    async function handleMindmapContextMenuAction(action) {
+      const issueId = currentContextMenuIssueId;
+      closeMindmapContextMenu();
+      if (!issueId) return;
+      if (action === "rename") {
+        await handleRenameIssueButtonClick(issueId);
+      } else if (action === "add-child") {
+        await handleAddChildIssueButtonClick(issueId);
+      } else if (action === "add-sibling") {
+        await handleAddSiblingIssueButtonClick(issueId);
+      } else if (action === "toggle-collapse") {
+        handleToggleIssueCollapseButtonClick(issueId);
+      } else if (action === "delete") {
+        await handleDeleteIssueButtonClick(issueId);
+      }
+    }
+
+    // 【前提】issueId は削除起点のノードid。
+    // 【処理】削除対象件数（起点＋子孫）をcollectIssueSubtreeIdsで数え、詳細設計書3.5.3節の
+    //   仕様どおり3件を超える場合のみconfirm()で確認する（3件以下は誤操作しても
+    //   取り返しがつく範囲とみなし、即削除する）。
+    // 【結果】確認OK、または3件以下ならdeleteIssueCascadeで削除しパネルを再描画する。
+    //   キャンセル時は何もしない。
+    async function handleDeleteIssueButtonClick(issueId) {
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      if (!issueList.some((issue) => issue.id === issueId)) return;
+      const subtreeIds = collectIssueSubtreeIds(issueList, issueId);
+      if (subtreeIds.length > 3) {
+        const confirmMessage = `このノードと子孫ノード計${subtreeIds.length}件を削除しますか？`;
+        if (!window.confirm(confirmMessage)) return;
+      }
+      await deleteIssueCascade(issueId, currentSelectedProjectId);
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】issueId は開閉を切り替えたいノードのid。
+    // 【処理】collapsedMindmapIssueIdsへの追加/削除だけを行い、パネルを再描画する
+    //   （折りたたみ状態はDB非保存の画面上だけの一時状態。collapsedScheduleIdsと同じ設計）。
+    // 【結果】対象ノードの子孫が表示/非表示になる。
+    function handleToggleIssueCollapseButtonClick(issueId) {
+      if (collapsedMindmapIssueIds.has(issueId)) {
+        collapsedMindmapIssueIds.delete(issueId);
+      } else {
+        collapsedMindmapIssueIds.add(issueId);
+      }
+      refreshMindmapPanel(currentSelectedProjectId);
     }
 
     // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
@@ -3770,19 +4080,15 @@
 
     // 【前提】なし。
     // 【処理】タスク管理（P1）は右側スライドパネルの開閉トグル（toggleSlidePanel）。
-    //   マインドマップはまだ旧方式のまま、現在のビューが対象ビューなら「ガント」へ戻し、
-    //   そうでなければ対象ビューへ切り替える（仕様書に明記の無いトグル的な挙動として、
-    //   もう一度押すとガントに戻る形にした＝今回の判断ポイント。P7スライドパネル化は別工程）。
-    // 【結果】タスク管理パネルの開閉、またはメインビューの切り替えが行われる。
+    //   マインドマップ（P7）もSIDE_PANEL_DEFINITIONS経由の共通配線に統合済みのため、
+    //   ここではP1のみを扱う（P1は既存の専用ハンドラのまま据え置いている）。
+    // 【結果】タスク管理パネルの開閉が行われる。
     function handleSwitchToKanbanButtonClick() {
       toggleSlidePanel("kanbanSlidePanel");
       document.getElementById("switchToKanbanButton").classList.toggle(
         "is-active",
         document.getElementById("kanbanSlidePanel").classList.contains("is-open")
       );
-    }
-    function handleSwitchToMindmapButtonClick() {
-      switchMainView(currentMainView === "mindmap" ? "gantt" : "mindmap");
     }
 
     // 【前提】event.currentTargetがdata-out-of-scope-label属性を持つボタンであること。
@@ -3807,6 +4113,36 @@
       document.getElementById("deleteProjectButton").addEventListener("click", handleDeleteProjectButtonClick);
       document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
+      // マインドマップのノードドラッグ。pointerdownは各ノードへのイベント委譲、
+      // pointermove/pointerupはドラッグ中にポインタがノード外へ出ても追従できるようdocument側で拾う。
+      document.getElementById("mindmapPanelBody").addEventListener("pointerdown", (event) => {
+        const node = event.target.closest(".mindmap-node");
+        if (!node) return;
+        handleMindmapNodePointerDown(event, node.dataset.issueId, node);
+      });
+      document.addEventListener("pointermove", handleMindmapNodePointerMove);
+      document.addEventListener("pointerup", handleMindmapNodePointerUp);
+      // マインドマップの右クリックメニュー。
+      document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
+        const node = event.target.closest(".mindmap-node");
+        if (!node) return;
+        event.preventDefault();
+        openMindmapContextMenu(node.dataset.issueId, event.clientX, event.clientY);
+      });
+      document.getElementById("mindmapContextMenu").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (button) handleMindmapContextMenuAction(button.dataset.action);
+      });
+      // メニューの外側をクリック、またはEscapeキーで閉じる。
+      document.addEventListener("click", (event) => {
+        const menuElement = document.getElementById("mindmapContextMenu");
+        if (!menuElement.hidden && !menuElement.contains(event.target)) {
+          closeMindmapContextMenu();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeMindmapContextMenu();
+      });
       document.getElementById("closeKanbanPanelButton").addEventListener("click", () => {
         closeSlidePanel("kanbanSlidePanel");
         document.getElementById("switchToKanbanButton").classList.remove("is-active");
@@ -3827,7 +4163,6 @@
       document.getElementById("toggleColumnEndDateButton").addEventListener("click", (event) => handleToggleColumnClick("endDate", event.currentTarget));
       document.getElementById("toggleColumnStatusButton").addEventListener("click", (event) => handleToggleColumnClick("status", event.currentTarget));
       document.getElementById("switchToKanbanButton").addEventListener("click", handleSwitchToKanbanButtonClick);
-      document.getElementById("switchToMindmapButton").addEventListener("click", handleSwitchToMindmapButtonClick);
       for (const outOfScopeButton of document.querySelectorAll("[data-out-of-scope-label]")) {
         outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
       }
@@ -3873,7 +4208,7 @@
         draggedScheduleId = null;
       });
 
-      // P2〜P6：右側スライドパネルの開閉配線。5パネルとも「ボタンでトグル開閉・
+      // P2〜P7：右側スライドパネルの開閉配線。6パネルとも「ボタンでトグル開閉・
       // 開いた瞬間に最新データへ再描画・×ボタンで必ず閉じる」という共通の挙動のため、
       // 定義テーブル1つと共通のwire関数にまとめる（P1タスク管理は既存の専用ハンドラの
       // ままとし、ここでは触れない）。
@@ -3883,6 +4218,7 @@
         { panelId: "memoSlidePanel", buttonId: "memoButton", closeButtonId: "closeMemoPanelButton", onOpen: () => refreshMemoPanel(currentSelectedProjectId) },
         { panelId: "commentSlidePanel", buttonId: "commentButton", closeButtonId: "closeCommentPanelButton", onOpen: () => refreshCommentPanel(currentSelectedProjectId) },
         { panelId: "changelogSlidePanel", buttonId: "changelogButton", closeButtonId: "closeChangelogPanelButton", onOpen: () => refreshChangelogPanel(currentSelectedProjectId) },
+        { panelId: "mindmapSlidePanel", buttonId: "switchToMindmapButton", closeButtonId: "closeMindmapPanelButton", onOpen: () => refreshMindmapPanel(currentSelectedProjectId) },
       ];
       for (const definition of SIDE_PANEL_DEFINITIONS) {
         document.getElementById(definition.buttonId).addEventListener("click", () => {
