@@ -432,6 +432,49 @@
         });
       });
     }
+
+    // ===== issues ストア（マインドマップ）のCRUD =====
+
+    // issues の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
+    // （いずれも STORE_DEFINITIONS の issues 定義と同じ値を指す）。
+    const STORE_ISSUES = "issues";
+    const INDEX_ISSUES_BY_PROJECT = "by_projectId";
+
+    // 【前提】issue は id を含む1件分のノードオブジェクト（id は呼び出し側で採番済み）。
+    // 【処理】読み書きトランザクションで issues ストアに put する（upsert）。
+    // 【結果】コミット完了後に resolve する（＝保存が確定したことを保証）。
+    async function addIssue(issue) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_ISSUES, "readwrite");
+      const store = transaction.objectStore(STORE_ISSUES);
+      return promisifyRequest(store.put(issue), transaction);
+    }
+
+    // 【前提】projectId は絞り込みたいプロジェクトの id。
+    // 【処理】by_projectId インデックスを使い、そのプロジェクトの全ノードを取得する
+    //   （マインドマップパネルを開いたプロジェクトのノードのみ表示するため）。
+    // 【結果】ノードの配列を resolve する（0件なら空配列）。親子どちらのノードも区別せず全件返す。
+    //   ※「特定ノードの子だけ」が欲しい場合は、issues には parentNodeId のインデックスが無いため
+    //     （データモデル設計3.4節）、この結果をアプリ層で parentNodeId 一致でフィルタする。
+    async function getIssuesByProject(projectId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_ISSUES, "readonly");
+      const index = transaction.objectStore(STORE_ISSUES).index(INDEX_ISSUES_BY_PROJECT);
+      return promisifyRequest(index.getAll(projectId), transaction);
+    }
+
+    // 【前提】issueId は削除したいノードの id。
+    // 【処理】issues ストアから該当1件“だけ”を削除する低レベル部品。
+    //   ※マインドマップのノード削除は、仕様上「対象ノード＋子孫ノードを再帰的に収集して削除」する
+    //   （詳細設計書3.5.3節。deleteSchedule と同じ考え方）。子孫の収集・一括削除は
+    //   この関数の責務に含めず、別工程の複合操作から呼び出す部品として使う。
+    // 【結果】コミット完了後に resolve する（対象が存在しなくても delete はエラーにならない＝冪等）。
+    async function deleteIssue(issueId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_ISSUES, "readwrite");
+      const store = transaction.objectStore(STORE_ISSUES);
+      return promisifyRequest(store.delete(issueId), transaction);
+    }
   </script>
 </body>
 </html>
