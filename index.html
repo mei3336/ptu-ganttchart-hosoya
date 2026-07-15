@@ -246,7 +246,7 @@
 
     .wbs-header-row .wbs-row-icons {
       flex: 0 0 auto;
-      width: 112px;
+      width: 96px;
     }
 
     .wbs-icon-button {
@@ -272,10 +272,39 @@
       cursor: not-allowed;
     }
 
-    .wbs-icon-spacer {
-      display: inline-block;
-      width: 18px;
-      height: 18px;
+    /* 開閉アイコンは「WBS番号とスケジュール名の間」に常時表示する（ホバー不要）。
+       .wbs-row-icons（ホバーで現れる操作アイコン群）の外に置くことでopacity制御の対象外にする。 */
+    .wbs-toggle-button {
+      margin: 0 4px;
+      vertical-align: middle;
+    }
+
+    /* WBS番号：お手本同様、太字＋強調色（UIデザイン仕様書1.1のプライマリ色）で目立たせる。 */
+    .wbs-number {
+      font-weight: 700;
+      color: var(--color-primary-navy);
+    }
+
+    /* ドラッグ用グリップハンドル。ホバー時のみうっすら表示する（操作アイコン群と同じ方針）。
+       行の左端・WBS番号よりさらに左（インデントの外側）に固定幅で置く。 */
+    .wbs-drag-handle {
+      flex: 0 0 14px;
+      width: 14px;
+      text-align: center;
+      color: var(--color-text-light);
+      cursor: grab;
+      opacity: 0;
+      transition: opacity .12s ease;
+      user-select: none;
+    }
+
+    .wbs-row:hover .wbs-drag-handle {
+      opacity: 1;
+    }
+
+    .wbs-drag-handle-spacer {
+      flex: 0 0 14px;
+      width: 14px;
     }
 
     .gantt-scroll-area {
@@ -1613,6 +1642,8 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
+    // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
+    let draggedScheduleId = null;
     // 現在表示中のメインビュー（"gantt" | "kanban" | "mindmap"）。
     let currentMainView = "gantt";
 
@@ -1879,13 +1910,19 @@
     //   常に全件）。visibleColumns は {startDate, endDate, status} の表示可否
     //   （基本設計書2.2節の固定順で右側から列を追加）。collapsedScheduleIds は折りたたまれている
     //   スケジュールidの集合。
-    // 【処理】WBSパネル（番号＋スケジュール名列＋トグルされた追加列＋ホバー操作アイコン）の
-    //   HTML文字列を組み立てる。WBS番号はcalculateWbsNumbersで全件から計算し（折りたたみで
-    //   隠れていても採番自体は変わらないようにするため）、実際に描画する行は
+    // 【処理】WBSパネル（ドラッグハンドル＋番号＋開閉＋スケジュール名列＋トグルされた追加列＋
+    //   操作アイコン）のHTML文字列を組み立てる。WBS番号はcalculateWbsNumbersで全件から計算し
+    //   （折りたたみで隠れていても採番自体は変わらないようにするため）、実際に描画する行は
     //   filterVisibleScheduleTreeRowsで絞り込む。
-    //   各行には開閉（子を持つ行のみ）／上下矢印（兄弟内の先頭・末尾では無効化）／
-    //   子スケジュール追加（孫＝3階層目では無効化）／編集／削除のアイコンを常にDOM上には
-    //   持たせ、CSSの:hoverで表示・非表示を切り替える（一覧仕様「ホバー時のみうっすら表示」）。
+    //
+    //   1行のレイアウト（左→右）：
+    //   [ドラッグハンドル・ホバー時のみ] [開閉アイコン・子を持つ行のみ・常時表示]
+    //   [WBS番号（太字・強調色）＋スケジュール名] [開始/終了/状態の追加列]
+    //   [操作アイコン群（↑↓✎＋🗑）・ホバー時のみ]
+    //
+    //   開閉アイコンだけは「常時表示」（基本設計書4.1節に記載のある機能のため、ホバー無しでも
+    //   操作できるようにする）。それ以外（ドラッグハンドル・操作アイコン群）はモーダル・
+    //   ダイアログ一覧「1.」の指示どおりホバー時のみうっすら表示する。
     // 【結果】wbsPanel要素のinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns, collapsedScheduleIds) {
       const headerExtraColumnsHtml = [
@@ -1893,7 +1930,7 @@
         visibleColumns.endDate ? '<div class="wbs-column-extra">終了日</div>' : "",
         visibleColumns.status ? '<div class="wbs-column-extra">状態</div>' : "",
       ].join("");
-      const headerHtml = `<div class="wbs-header-row"><div class="wbs-row-icons"></div><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}</div>`;
+      const headerHtml = `<div class="wbs-header-row"><span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>`;
 
       if (scheduleTreeRows.length === 0) {
         return headerHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
@@ -1905,7 +1942,9 @@
       const rowsHtml = visibleRows
         .map(({ schedule, depthLevel, hasChildren, siblingIndex, siblingCount }) => {
           const wbsNumber = wbsNumberByScheduleId.get(schedule.id);
-          const indentedName = "　".repeat(depthLevel) + escapeHtmlText(wbsNumber) + " " + escapeHtmlText(schedule.name);
+          const indentedName =
+            "　".repeat(depthLevel) +
+            `<span class="wbs-number">${escapeHtmlText(wbsNumber)}</span>`;
           const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
           const extraColumnsHtml = [
             visibleColumns.startDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.startDate)}</div>` : "",
@@ -1913,23 +1952,26 @@
             visibleColumns.status ? `<div class="wbs-column-extra">${escapeHtmlText(statusLabel)}</div>` : "",
           ].join("");
 
+          // 開閉アイコンは「WBS番号とスケジュール名の間」に常時表示する（ホバー不要）。
+          // 子を持たない行はアイコン自体を出さない（スペーサーも置かない）。
           const isCollapsed = collapsedScheduleIds.has(schedule.id);
-          const toggleIconHtml = hasChildren
-            ? `<button type="button" class="wbs-icon-button" data-action="toggle-collapse" title="開閉">${isCollapsed ? "▸" : "▾"}</button>`
-            : '<span class="wbs-icon-spacer"></span>';
+          const toggleButtonHtml = hasChildren
+            ? `<button type="button" class="wbs-icon-button wbs-toggle-button" data-action="toggle-collapse" title="開閉">${isCollapsed ? "＋" : "－"}</button>`
+            : "";
+
           const isFirstInGroup = siblingIndex === 0;
           const isLastInGroup = siblingIndex === siblingCount - 1;
           const canAddChild = depthLevel < MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN;
+          // 操作アイコン群は行の右端（追加列のさらに右）に、上／下／編集／子追加／削除の順で表示する。
           const iconsHtml = `<div class="wbs-row-icons">
-            ${toggleIconHtml}
             <button type="button" class="wbs-icon-button" data-action="move-up" ${isFirstInGroup ? "disabled" : ""} title="上へ移動">↑</button>
             <button type="button" class="wbs-icon-button" data-action="move-down" ${isLastInGroup ? "disabled" : ""} title="下へ移動">↓</button>
-            <button type="button" class="wbs-icon-button" data-action="add-child" ${canAddChild ? "" : "disabled"} title="子スケジュール追加">＋</button>
             <button type="button" class="wbs-icon-button" data-action="edit" title="編集">✎</button>
+            <button type="button" class="wbs-icon-button" data-action="add-child" ${canAddChild ? "" : "disabled"} title="子スケジュール追加">＋</button>
             <button type="button" class="wbs-icon-button" data-action="delete" title="削除">🗑</button>
           </div>`;
 
-          return `<div class="wbs-row" data-schedule-id="${escapeHtmlText(schedule.id)}">${iconsHtml}<div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
+          return `<div class="wbs-row" draggable="true" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="wbs-drag-handle" title="ドラッグして並び替え">⋮⋮</span><div class="wbs-column-name">${indentedName}${toggleButtonHtml} ${escapeHtmlText(schedule.name)}</div>${extraColumnsHtml}${iconsHtml}</div>`;
         })
         .join("");
       return headerHtml + rowsHtml;
@@ -2740,6 +2782,35 @@
       await refreshGanttPanel(currentSelectedProjectId);
     }
 
+    // 【前提】draggedId は掴んで動かしたスケジュールのid。targetId はドロップ先の行のid。
+    //   同じidの場合、または親（parentId）が異なる場合（基本設計書4.1節「並び替えは同一階層
+    //   内でのみ可能」）は何もしない。
+    // 【処理】ドラッグ対象と同じ兄弟グループ内で、ドロップ先の位置へドラッグ対象を移動し、
+    //   兄弟全員のorderを0番から振り直して保存する（クリックでの上下移動は隣接swapで済むが、
+    //   ドラッグは任意の位置へ一気に移動できるため、隣接swapでは対応できず全員の振り直しが必要）。
+    // 【結果】兄弟内の並び順が変わり、ガントパネルが再描画される。
+    async function handleScheduleDragDrop(draggedId, targetId) {
+      if (draggedId === targetId) return;
+      const draggedRow = currentScheduleTreeRows.find((row) => row.schedule.id === draggedId);
+      const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === targetId);
+      if (!draggedRow || !targetRow) return;
+      if (draggedRow.schedule.parentId !== targetRow.schedule.parentId) return;
+
+      const siblingSchedules = currentScheduleTreeRows
+        .filter((row) => row.schedule.parentId === draggedRow.schedule.parentId)
+        .map((row) => row.schedule)
+        .sort((a, b) => a.order - b.order);
+      const fromIndex = siblingSchedules.findIndex((schedule) => schedule.id === draggedId);
+      const toIndex = siblingSchedules.findIndex((schedule) => schedule.id === targetId);
+      const [movedSchedule] = siblingSchedules.splice(fromIndex, 1);
+      siblingSchedules.splice(toIndex, 0, movedSchedule);
+
+      for (let index = 0; index < siblingSchedules.length; index++) {
+        await addSchedule({ ...siblingSchedules[index], order: index });
+      }
+      await refreshGanttPanel(currentSelectedProjectId);
+    }
+
     // 【前提】scheduleId は削除したいスケジュールのid。
     // 【処理】子の有無でC2（子なし）／C3（子あり・サブタスクごと削除）の確認文言を切り替えて
     //   confirm()し、OKならdeleteScheduleCascadeで削除する（連鎖削除・コメント削除・
@@ -2986,6 +3057,25 @@
         }
         const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
+      });
+      // ドラッグ＆ドロップによる並び替え（上下矢印ボタンと併用。同じ兄弟グループ内のみ有効
+      // ＝handleScheduleDragDrop側でparentId一致を判定する）。
+      document.getElementById("wbsPanel").addEventListener("dragstart", (event) => {
+        const draggedRow = event.target.closest(".wbs-row[data-schedule-id]");
+        if (!draggedRow) return;
+        draggedScheduleId = draggedRow.dataset.scheduleId;
+        event.dataTransfer.effectAllowed = "move";
+      });
+      document.getElementById("wbsPanel").addEventListener("dragover", (event) => {
+        // ドロップを許可するにはdragoverでpreventDefault()が必須（ブラウザの既定動作）。
+        if (event.target.closest(".wbs-row[data-schedule-id]")) event.preventDefault();
+      });
+      document.getElementById("wbsPanel").addEventListener("drop", (event) => {
+        const targetRow = event.target.closest(".wbs-row[data-schedule-id]");
+        if (!targetRow || !draggedScheduleId) return;
+        event.preventDefault();
+        handleScheduleDragDrop(draggedScheduleId, targetRow.dataset.scheduleId);
+        draggedScheduleId = null;
       });
 
       const projectList = await getAllProjects();
