@@ -246,7 +246,7 @@
 
     .wbs-header-row .wbs-row-icons {
       flex: 0 0 auto;
-      width: 112px;
+      width: 96px;
     }
 
     .wbs-icon-button {
@@ -272,10 +272,39 @@
       cursor: not-allowed;
     }
 
-    .wbs-icon-spacer {
-      display: inline-block;
-      width: 18px;
-      height: 18px;
+    /* 開閉アイコンは「WBS番号とスケジュール名の間」に常時表示する（ホバー不要）。
+       .wbs-row-icons（ホバーで現れる操作アイコン群）の外に置くことでopacity制御の対象外にする。 */
+    .wbs-toggle-button {
+      margin: 0 4px;
+      vertical-align: middle;
+    }
+
+    /* WBS番号：お手本同様、太字＋強調色（UIデザイン仕様書1.1のプライマリ色）で目立たせる。 */
+    .wbs-number {
+      font-weight: 700;
+      color: var(--color-primary-navy);
+    }
+
+    /* ドラッグ用グリップハンドル。ホバー時のみうっすら表示する（操作アイコン群と同じ方針）。
+       行の左端・WBS番号よりさらに左（インデントの外側）に固定幅で置く。 */
+    .wbs-drag-handle {
+      flex: 0 0 14px;
+      width: 14px;
+      text-align: center;
+      color: var(--color-text-light);
+      cursor: grab;
+      opacity: 0;
+      transition: opacity .12s ease;
+      user-select: none;
+    }
+
+    .wbs-row:hover .wbs-drag-handle {
+      opacity: 1;
+    }
+
+    .wbs-drag-handle-spacer {
+      flex: 0 0 14px;
+      width: 14px;
     }
 
     .gantt-scroll-area {
@@ -678,6 +707,139 @@
       font-family: inherit;
       font-size: 12px;
     }
+
+    /* ===== P2〜P6：右側スライドパネル共通の一覧項目・入力欄スタイル ===== */
+    .panel-list-item {
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .panel-list-item-main {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .panel-list-item-meta {
+      color: var(--color-text-light);
+      font-size: 11px;
+    }
+
+    .panel-list-item-actions {
+      display: flex;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+
+    /* P3：即時メモの投稿欄（パネル下部固定） */
+    .quick-memo-input-area {
+      display: flex;
+      gap: 8px;
+      padding: 8px 16px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .quick-memo-input-area textarea {
+      flex: 1;
+      padding: 6px 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    /* P4：メモパネルは左に一覧・右に編集エリアの2カラム構成 */
+    .memo-panel-body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .memo-list-column {
+      flex: 0 0 auto;
+      max-height: 40%;
+      overflow-y: auto;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .memo-list-item {
+      cursor: pointer;
+    }
+
+    .memo-list-item.is-selected {
+      background: var(--color-primary-light);
+    }
+
+    .memo-editor-column {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .memo-editor-column input[type="text"] {
+      padding: 6px 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .memo-editor-column textarea {
+      flex: 1;
+      min-height: 240px;
+      padding: 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    /* P5：コメント一覧はスケジュール単位でグルーピングする */
+    .comment-group-heading {
+      padding: 8px 16px 4px;
+      font-weight: 600;
+      color: var(--color-primary-navy);
+      background: var(--color-surface-2);
+    }
+
+    /* P6：変更履歴のフィルタタブ */
+    .changelog-filter-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .changelog-action-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--color-white);
+    }
+
+    .changelog-action-badge.is-add {
+      background: var(--color-accent);
+    }
+
+    .changelog-action-badge.is-edit {
+      background: #D97706;
+    }
+
+    .changelog-action-badge.is-delete {
+      background: var(--color-danger);
+    }
   </style>
 </head>
 <body>
@@ -715,12 +877,11 @@
       <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
     <div class="header-group">
-      <!-- スナップショット／即時メモ／メモ／コメント／変更履歴はサイドパネル機能のため今回のスコープ外。 -->
-      <button class="toolbar-button" type="button" data-out-of-scope-label="スナップショット">スナップショット</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="即時メモ">即時メモ</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="メモ">メモ</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="コメント">コメント</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="変更履歴">変更履歴</button>
+      <button id="snapshotButton" class="toolbar-button" type="button">スナップショット</button>
+      <button id="quickMemoButton" class="toolbar-button" type="button">即時メモ</button>
+      <button id="memoButton" class="toolbar-button" type="button">メモ</button>
+      <button id="commentButton" class="toolbar-button" type="button">コメント</button>
+      <button id="changelogButton" class="toolbar-button" type="button">変更履歴</button>
       <button id="switchToMindmapButton" class="toolbar-button" type="button">マインドマップ</button>
       <button id="switchToKanbanButton" class="toolbar-button" type="button">タスク管理</button>
     </div>
@@ -752,6 +913,76 @@
     </div>
     <div class="slide-panel-body">
       <div id="kanbanPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P2：スナップショット一覧。保存・一覧・削除のみ（復元・比較は別工程）。 -->
+  <aside id="snapshotSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>スナップショット</h2>
+      <button type="button" id="closeSnapshotPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <button id="saveSnapshotButton" class="panel-add-button" type="button">＋ スナップショットを保存</button>
+      <div id="snapshotPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P3：即時メモ。個別削除は確認なし即削除（既知の仕様）。 -->
+  <aside id="quickMemoSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>即時メモ</h2>
+      <button type="button" id="closeQuickMemoPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div id="quickMemoPanelBody"></div>
+      <div class="quick-memo-input-area">
+        <textarea id="quickMemoTextInput" rows="2" placeholder="即時メモを入力（Ctrl+Enterで投稿）"></textarea>
+        <button id="postQuickMemoButton" class="panel-add-button" type="button">投稿</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- P4：メモ。左に一覧、右に編集エリア（プレーンテキスト。Markdown変換は別工程）。 -->
+  <aside id="memoSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>メモ</h2>
+      <button type="button" id="closeMemoPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body memo-panel-body">
+      <div class="memo-list-column">
+        <button id="createMemoButton" class="panel-add-button" type="button">＋ 新規メモ</button>
+        <div id="memoListBody"></div>
+      </div>
+      <div class="memo-editor-column" id="memoEditorBody"></div>
+    </div>
+  </aside>
+
+  <!-- P5：コメント一覧。プロジェクト内の全スケジュールに紐づくコメントをスケジュール単位で表示。 -->
+  <aside id="commentSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>コメント</h2>
+      <button type="button" id="closeCommentPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div id="commentPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P6：変更履歴。一覧＋フィルタタブ（すべて/追加/変更/削除）。「戻す」は別工程。 -->
+  <aside id="changelogSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>変更履歴</h2>
+      <button type="button" id="closeChangelogPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div class="changelog-filter-tabs" id="changelogFilterTabs">
+        <button type="button" class="toolbar-button is-active" data-changelog-filter="all">すべて</button>
+        <button type="button" class="toolbar-button" data-changelog-filter="add">追加</button>
+        <button type="button" class="toolbar-button" data-changelog-filter="edit">変更</button>
+        <button type="button" class="toolbar-button" data-changelog-filter="delete">削除</button>
+      </div>
+      <div id="changelogPanelBody"></div>
     </div>
   </aside>
 
@@ -1613,6 +1844,8 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
+    // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
+    let draggedScheduleId = null;
     // 現在表示中のメインビュー（"gantt" | "kanban" | "mindmap"）。
     let currentMainView = "gantt";
 
@@ -1879,13 +2112,19 @@
     //   常に全件）。visibleColumns は {startDate, endDate, status} の表示可否
     //   （基本設計書2.2節の固定順で右側から列を追加）。collapsedScheduleIds は折りたたまれている
     //   スケジュールidの集合。
-    // 【処理】WBSパネル（番号＋スケジュール名列＋トグルされた追加列＋ホバー操作アイコン）の
-    //   HTML文字列を組み立てる。WBS番号はcalculateWbsNumbersで全件から計算し（折りたたみで
-    //   隠れていても採番自体は変わらないようにするため）、実際に描画する行は
+    // 【処理】WBSパネル（ドラッグハンドル＋番号＋開閉＋スケジュール名列＋トグルされた追加列＋
+    //   操作アイコン）のHTML文字列を組み立てる。WBS番号はcalculateWbsNumbersで全件から計算し
+    //   （折りたたみで隠れていても採番自体は変わらないようにするため）、実際に描画する行は
     //   filterVisibleScheduleTreeRowsで絞り込む。
-    //   各行には開閉（子を持つ行のみ）／上下矢印（兄弟内の先頭・末尾では無効化）／
-    //   子スケジュール追加（孫＝3階層目では無効化）／編集／削除のアイコンを常にDOM上には
-    //   持たせ、CSSの:hoverで表示・非表示を切り替える（一覧仕様「ホバー時のみうっすら表示」）。
+    //
+    //   1行のレイアウト（左→右）：
+    //   [ドラッグハンドル・ホバー時のみ] [開閉アイコン・子を持つ行のみ・常時表示]
+    //   [WBS番号（太字・強調色）＋スケジュール名] [開始/終了/状態の追加列]
+    //   [操作アイコン群（↑↓✎＋🗑）・ホバー時のみ]
+    //
+    //   開閉アイコンだけは「常時表示」（基本設計書4.1節に記載のある機能のため、ホバー無しでも
+    //   操作できるようにする）。それ以外（ドラッグハンドル・操作アイコン群）はモーダル・
+    //   ダイアログ一覧「1.」の指示どおりホバー時のみうっすら表示する。
     // 【結果】wbsPanel要素のinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns, collapsedScheduleIds) {
       const headerExtraColumnsHtml = [
@@ -1893,7 +2132,7 @@
         visibleColumns.endDate ? '<div class="wbs-column-extra">終了日</div>' : "",
         visibleColumns.status ? '<div class="wbs-column-extra">状態</div>' : "",
       ].join("");
-      const headerHtml = `<div class="wbs-header-row"><div class="wbs-row-icons"></div><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}</div>`;
+      const headerHtml = `<div class="wbs-header-row"><span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>`;
 
       if (scheduleTreeRows.length === 0) {
         return headerHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
@@ -1905,7 +2144,9 @@
       const rowsHtml = visibleRows
         .map(({ schedule, depthLevel, hasChildren, siblingIndex, siblingCount }) => {
           const wbsNumber = wbsNumberByScheduleId.get(schedule.id);
-          const indentedName = "　".repeat(depthLevel) + escapeHtmlText(wbsNumber) + " " + escapeHtmlText(schedule.name);
+          const indentedName =
+            "　".repeat(depthLevel) +
+            `<span class="wbs-number">${escapeHtmlText(wbsNumber)}</span>`;
           const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
           const extraColumnsHtml = [
             visibleColumns.startDate ? `<div class="wbs-column-extra">${escapeHtmlText(schedule.startDate)}</div>` : "",
@@ -1913,23 +2154,26 @@
             visibleColumns.status ? `<div class="wbs-column-extra">${escapeHtmlText(statusLabel)}</div>` : "",
           ].join("");
 
+          // 開閉アイコンは「WBS番号とスケジュール名の間」に常時表示する（ホバー不要）。
+          // 子を持たない行はアイコン自体を出さない（スペーサーも置かない）。
           const isCollapsed = collapsedScheduleIds.has(schedule.id);
-          const toggleIconHtml = hasChildren
-            ? `<button type="button" class="wbs-icon-button" data-action="toggle-collapse" title="開閉">${isCollapsed ? "▸" : "▾"}</button>`
-            : '<span class="wbs-icon-spacer"></span>';
+          const toggleButtonHtml = hasChildren
+            ? `<button type="button" class="wbs-icon-button wbs-toggle-button" data-action="toggle-collapse" title="開閉">${isCollapsed ? "＋" : "－"}</button>`
+            : "";
+
           const isFirstInGroup = siblingIndex === 0;
           const isLastInGroup = siblingIndex === siblingCount - 1;
           const canAddChild = depthLevel < MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN;
+          // 操作アイコン群は行の右端（追加列のさらに右）に、上／下／編集／子追加／削除の順で表示する。
           const iconsHtml = `<div class="wbs-row-icons">
-            ${toggleIconHtml}
             <button type="button" class="wbs-icon-button" data-action="move-up" ${isFirstInGroup ? "disabled" : ""} title="上へ移動">↑</button>
             <button type="button" class="wbs-icon-button" data-action="move-down" ${isLastInGroup ? "disabled" : ""} title="下へ移動">↓</button>
-            <button type="button" class="wbs-icon-button" data-action="add-child" ${canAddChild ? "" : "disabled"} title="子スケジュール追加">＋</button>
             <button type="button" class="wbs-icon-button" data-action="edit" title="編集">✎</button>
+            <button type="button" class="wbs-icon-button" data-action="add-child" ${canAddChild ? "" : "disabled"} title="子スケジュール追加">＋</button>
             <button type="button" class="wbs-icon-button" data-action="delete" title="削除">🗑</button>
           </div>`;
 
-          return `<div class="wbs-row" data-schedule-id="${escapeHtmlText(schedule.id)}">${iconsHtml}<div class="wbs-column-name">${indentedName}</div>${extraColumnsHtml}</div>`;
+          return `<div class="wbs-row" draggable="true" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="wbs-drag-handle" title="ドラッグして並び替え">⋮⋮</span><div class="wbs-column-name">${indentedName}${toggleButtonHtml} ${escapeHtmlText(schedule.name)}</div>${extraColumnsHtml}${iconsHtml}</div>`;
         })
         .join("");
       return headerHtml + rowsHtml;
@@ -2344,6 +2588,442 @@
       applyKanbanPanel(renderKanbanBoardToHtml(groupTasksByStatus(taskList)));
     }
 
+    // ===== P2：スナップショットパネル =====
+    // 【設計判断】モーダル・ダイアログ一覧の指示どおり、今回は保存・一覧表示・削除のみを
+    //   実装する。「復元」（現在のスケジュール全削除→書き戻し、変更履歴に記録しない特殊な
+    //   複合操作）と「比較」は別工程とする。
+
+    // 【前提】snapshotList は同一プロジェクト内のスナップショット全件。
+    // 【処理】名前・作成日時・削除ボタンを持つ一覧のHTML文字列を組み立てる（DOMには触れない）。
+    // 【結果】snapshotPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderSnapshotListToHtml(snapshotList) {
+      if (snapshotList.length === 0) {
+        return '<p class="empty-state-message">スナップショットがありません。</p>';
+      }
+      return snapshotList
+        .slice()
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+        .map(
+          (snapshot) => `<div class="panel-list-item" data-snapshot-id="${escapeHtmlText(snapshot.id)}">
+            <div class="panel-list-item-main">
+              <div>${escapeHtmlText(snapshot.name)}</div>
+              <div class="panel-list-item-meta">${escapeHtmlText(snapshot.createdAt)}</div>
+            </div>
+            <div class="panel-list-item-actions">
+              <button type="button" class="wbs-icon-button" data-action="delete-snapshot" title="削除">🗑</button>
+            </div>
+          </div>`
+        )
+        .join("");
+    }
+
+    function applySnapshotPanel(bodyHtml) {
+      document.getElementById("snapshotPanelBody").innerHTML = bodyHtml;
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】projectIdがnullなら空状態を表示し、そうでなければgetSnapshotsByProjectで
+    //   取得して一覧を再描画する。
+    // 【結果】スナップショットパネルの表示が最新の状態に更新される。
+    async function refreshSnapshotPanel(projectId) {
+      if (!projectId) {
+        applySnapshotPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const snapshotList = await getSnapshotsByProject(projectId);
+      applySnapshotPanel(renderSnapshotListToHtml(snapshotList));
+    }
+
+    // 【前提】currentSelectedProjectId・currentProjectObjectが設定済みであること。
+    // 【処理】名前をprompt()で受け取り（既定値：「{プロジェクト名} - {今日の日付}」、
+    //   モーダル・ダイアログ一覧P2）、現在のプロジェクト情報＋スケジュール全件を
+    //   dataとして保存する（データモデル設計3.8節：data={project, schedules}）。
+    // 【結果】保存後、パネルを再描画する。
+    async function handleSaveSnapshotButtonClick() {
+      if (!currentSelectedProjectId || !currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const todayDateString = new Date().toISOString().slice(0, 10);
+      const defaultName = `${currentProjectObject.name} - ${todayDateString}`;
+      const snapshotName = window.prompt("スナップショット名を入力してください", defaultName);
+      if (!snapshotName) return;
+      await addSnapshot({
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        name: snapshotName,
+        createdAt: new Date().toISOString(),
+        data: {
+          project: currentProjectObject,
+          schedules: currentScheduleTreeRows.map((row) => row.schedule),
+        },
+      });
+      await refreshSnapshotPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】snapshotId は削除したいスナップショットのid。
+    // 【処理】確認ダイアログ（モーダル・ダイアログ一覧C7：確認ダイアログのみ、成功トースト無し）
+    //   の上でdeleteSnapshotする。
+    // 【結果】確認OK時、削除してパネルを再描画する。
+    async function handleDeleteSnapshotButtonClick(snapshotId) {
+      if (!window.confirm("このスナップショットを削除しますか？")) return;
+      await deleteSnapshot(snapshotId);
+      await refreshSnapshotPanel(currentSelectedProjectId);
+    }
+
+    // ===== P3：即時メモパネル =====
+
+    // 【前提】quickMemoList は同一プロジェクト内の即時メモ全件。
+    // 【処理】投稿日時の昇順（古い→新しい、チャットのタイムライン表示）に並べ、
+    //   各メモに削除ボタンを持つHTML文字列を組み立てる。
+    // 【結果】quickMemoPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderQuickMemoTimelineToHtml(quickMemoList) {
+      if (quickMemoList.length === 0) {
+        return '<p class="empty-state-message">即時メモがありません。</p>';
+      }
+      return quickMemoList
+        .slice()
+        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+        .map(
+          (quickMemo) => `<div class="panel-list-item" data-quick-memo-id="${escapeHtmlText(quickMemo.id)}">
+            <div class="panel-list-item-main">
+              <div>${escapeHtmlText(quickMemo.text)}</div>
+              <div class="panel-list-item-meta">${escapeHtmlText(quickMemo.createdAt)}</div>
+            </div>
+            <div class="panel-list-item-actions">
+              <button type="button" class="wbs-icon-button" data-action="delete-quick-memo" title="削除">🗑</button>
+            </div>
+          </div>`
+        )
+        .join("");
+    }
+
+    function applyQuickMemoPanel(bodyHtml) {
+      document.getElementById("quickMemoPanelBody").innerHTML = bodyHtml;
+    }
+
+    async function refreshQuickMemoPanel(projectId) {
+      if (!projectId) {
+        applyQuickMemoPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const quickMemoList = await getQuickMemosByProject(projectId);
+      applyQuickMemoPanel(renderQuickMemoTimelineToHtml(quickMemoList));
+      // 投稿後・削除後も一覧の最新（末尾）が見えるよう、パネル下端までスクロールする。
+      const panelBody = document.getElementById("quickMemoPanelBody");
+      panelBody.scrollTop = panelBody.scrollHeight;
+    }
+
+    // 【前提】currentSelectedProjectIdが設定済みであること。
+    // 【処理】投稿欄のテキストが空でなければaddQuickMemoで保存し、入力欄を空にする。
+    // 【結果】投稿後、パネルを再描画する。
+    async function handlePostQuickMemoButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const textInput = document.getElementById("quickMemoTextInput");
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addQuickMemo({ id: generateId(), projectId: currentSelectedProjectId, text, createdAt: new Date().toISOString() });
+      textInput.value = "";
+      await refreshQuickMemoPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】quickMemoId は削除したい即時メモのid。
+    // 【処理】確認ダイアログ無しで即削除する（基本設計書10.1節：即時メモの個別削除は
+    //   「書き捨てメモ」という性質上、確認なしの即削除が仕様として扱われる）。
+    // 【結果】削除後、パネルを再描画する。
+    async function handleDeleteQuickMemoButtonClick(quickMemoId) {
+      await deleteQuickMemo(quickMemoId);
+      await refreshQuickMemoPanel(currentSelectedProjectId);
+    }
+
+    // ===== P4：メモパネル =====
+    // 【設計判断】自動保存はデバウンス方式ではなく、入力欄からフォーカスが外れた時点
+    //   （blur）で保存する簡略版にする。デバウンスタイマーの管理はコードの複雑さの割に
+    //   今回のスコープでの価値が低いと判断した。Markdownプレビューも今回は実装せず、
+    //   プレーンテキストのまま表示・編集する。
+
+    // 現在エディタで開いているメモのid。未選択時はnull。
+    let currentSelectedMemoId = null;
+
+    // 【前提】memoList は同一プロジェクト内のメモ全件。selectedMemoId は現在編集中のメモid。
+    // 【処理】タイトル・更新日時・削除ボタンを持つ一覧のHTML文字列を組み立てる。選択中の
+    //   メモにはis-selectedクラスを付ける。
+    // 【結果】memoListBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderMemoListToHtml(memoList, selectedMemoId) {
+      if (memoList.length === 0) {
+        return '<p class="empty-state-message">メモがありません。</p>';
+      }
+      const sortByOrder = (a, b) => a.order - b.order;
+      return memoList
+        .slice()
+        .sort(sortByOrder)
+        .map((memo) => {
+          const selectedClass = memo.id === selectedMemoId ? " is-selected" : "";
+          return `<div class="panel-list-item memo-list-item${selectedClass}" data-memo-id="${escapeHtmlText(memo.id)}" data-action="select-memo">
+            <div class="panel-list-item-main">
+              <div>${escapeHtmlText(memo.title)}</div>
+              <div class="panel-list-item-meta">${escapeHtmlText(memo.updatedAt)}</div>
+            </div>
+            <div class="panel-list-item-actions">
+              <button type="button" class="wbs-icon-button" data-action="delete-memo" title="削除">🗑</button>
+            </div>
+          </div>`;
+        })
+        .join("");
+    }
+
+    // 【前提】memo はnull（未選択）または選択中のメモオブジェクト。
+    // 【処理】タイトル入力欄・本文テキストエリアを持つ編集エリアのHTML文字列を組み立てる。
+    // 【結果】memoEditorBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderMemoEditorToHtml(memo) {
+      if (!memo) {
+        return '<p class="empty-state-message">左の一覧からメモを選択するか、新規作成してください。</p>';
+      }
+      return `
+        <input type="text" id="memoEditorTitleInput" value="${escapeHtmlText(memo.title)}" placeholder="タイトル">
+        <textarea id="memoEditorBodyTextarea" placeholder="本文（Markdown）">${escapeHtmlText(memo.body)}</textarea>
+      `;
+    }
+
+    function applyMemoListPanel(bodyHtml) {
+      document.getElementById("memoListBody").innerHTML = bodyHtml;
+    }
+
+    function applyMemoEditorPanel(bodyHtml) {
+      document.getElementById("memoEditorBody").innerHTML = bodyHtml;
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】getMemosByProjectで取得して一覧を再描画し、currentSelectedMemoIdが
+    //   まだ存在するメモを指していれば、そのメモをエディタに再表示する
+    //   （存在しなくなっていれば＝削除された場合、選択を解除する）。
+    // 【結果】メモ一覧・編集エリア両方の表示が最新の状態に更新される。
+    async function refreshMemoPanel(projectId) {
+      if (!projectId) {
+        applyMemoListPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        applyMemoEditorPanel(null);
+        currentSelectedMemoId = null;
+        return;
+      }
+      const memoList = await getMemosByProject(projectId);
+      if (currentSelectedMemoId && !memoList.some((memo) => memo.id === currentSelectedMemoId)) {
+        currentSelectedMemoId = null;
+      }
+      applyMemoListPanel(renderMemoListToHtml(memoList, currentSelectedMemoId));
+      const selectedMemo = memoList.find((memo) => memo.id === currentSelectedMemoId) || null;
+      applyMemoEditorPanel(renderMemoEditorToHtml(selectedMemo));
+    }
+
+    async function handleCreateMemoButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const memoList = await getMemosByProject(currentSelectedProjectId);
+      const nowIsoString = new Date().toISOString();
+      const newMemo = {
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: "新規メモ",
+        body: "",
+        order: memoList.length,
+        createdAt: nowIsoString,
+        updatedAt: nowIsoString,
+      };
+      await addMemo(newMemo);
+      currentSelectedMemoId = newMemo.id;
+      await refreshMemoPanel(currentSelectedProjectId);
+    }
+
+    function handleSelectMemoButtonClick(memoId) {
+      currentSelectedMemoId = memoId;
+      refreshMemoPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】memoId は削除したいメモのid。
+    // 【処理】確認ダイアログ（モーダル・ダイアログ一覧C4）の上でdeleteMemoする。
+    // 【結果】確認OK時、削除してパネルを再描画する（選択解除はrefreshMemoPanel側で判定）。
+    async function handleDeleteMemoButtonClick(memoId) {
+      const memoList = await getMemosByProject(currentSelectedProjectId);
+      const targetMemo = memoList.find((memo) => memo.id === memoId);
+      if (!targetMemo) return;
+      if (!window.confirm(`「${targetMemo.title || "無題"}」を削除しますか？`)) return;
+      await deleteMemo(memoId);
+      await refreshMemoPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】currentSelectedMemoIdが設定済み（エディタにメモが表示されている）であること。
+    // 【処理】タイトル・本文入力欄からフォーカスが外れた時点で読み取り、addMemoで保存する。
+    // 【結果】保存後、一覧側の表示（タイトル・更新日時）を最新化する。
+    async function handleMemoEditorFieldBlur() {
+      if (!currentSelectedMemoId) return;
+      const memoList = await getMemosByProject(currentSelectedProjectId);
+      const existingMemo = memoList.find((memo) => memo.id === currentSelectedMemoId);
+      if (!existingMemo) return;
+      const title = document.getElementById("memoEditorTitleInput").value;
+      const body = document.getElementById("memoEditorBodyTextarea").value;
+      await addMemo({ ...existingMemo, title, body, updatedAt: new Date().toISOString() });
+      const memoListAfterSave = await getMemosByProject(currentSelectedProjectId);
+      applyMemoListPanel(renderMemoListToHtml(memoListAfterSave, currentSelectedMemoId));
+    }
+
+    // ===== P5：コメント一覧パネル =====
+    // 【設計判断】commentsはprojectIdを持たないため（データモデル設計3.5節）、
+    //   getSchedulesByProjectで対象スケジュールid集合を先に取得し、各idについて
+    //   getCommentsByTaskで束ねる（複数ストアをまたぐ合成処理）。
+    //   コメントの追加導線は本来M4（スケジュール編集モーダル）に埋め込む仕様だが、
+    //   M4への埋め込みは別工程のため、今回はこのパネル内に「スケジュールを選んで投稿」する
+    //   簡易フォームを暫定的に置く（スコープの妥協点）。
+
+    // 【前提】commentGroups は [{schedule, comments}] の配列（コメントが1件以上ある
+    //   スケジュールのみ）。
+    // 【処理】スケジュール名を見出しに、コメント本文・投稿日時を並べたHTML文字列を組み立てる。
+    // 【結果】commentPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderCommentGroupsToHtml(commentGroups) {
+      if (commentGroups.length === 0) {
+        return '<p class="empty-state-message">コメントがありません。</p>';
+      }
+      return commentGroups
+        .map(({ schedule, comments }) => {
+          const commentsHtml = comments
+            .slice()
+            .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+            .map(
+              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+                <div class="panel-list-item-main">
+                  <div>${escapeHtmlText(comment.text)}</div>
+                  <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
+                </div>
+              </div>`
+            )
+            .join("");
+          return `<div class="comment-group-heading">${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
+        })
+        .join("");
+    }
+
+    // 【前提】scheduleList は同一プロジェクト内のスケジュール全件。
+    // 【処理】投稿先スケジュールを選ぶ<select>・テキスト欄・投稿ボタンを持つ簡易フォームの
+    //   HTML文字列を組み立てる。
+    // 【結果】コメント投稿フォームのHTML文字列を返す。
+    function renderCommentPostFormToHtml(scheduleList) {
+      const optionsHtml = scheduleList.map((schedule) => `<option value="${escapeHtmlText(schedule.id)}">${escapeHtmlText(schedule.name)}</option>`).join("");
+      return `<div class="kanban-add-form" style="margin:8px 16px;">
+        <select id="commentTargetScheduleSelect">${optionsHtml}</select>
+        <input type="text" id="commentTextInput" placeholder="コメントを入力">
+        <button type="button" class="panel-add-button" id="postCommentButton">投稿</button>
+      </div>`;
+    }
+
+    function applyCommentPanel(bodyHtml) {
+      document.getElementById("commentPanelBody").innerHTML = bodyHtml;
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】getSchedulesByProjectでスケジュールid集合を取得し、各idについて
+    //   getCommentsByTaskで束ねてcommentGroupsを作る。投稿フォーム＋グルーピング一覧を
+    //   両方描画する。
+    // 【結果】コメントパネルの表示が最新の状態に更新される。
+    async function refreshCommentPanel(projectId) {
+      if (!projectId) {
+        applyCommentPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      const scheduleList = await getSchedulesByProject(projectId);
+      const commentGroups = [];
+      for (const schedule of scheduleList) {
+        const comments = await getCommentsByTask(schedule.id);
+        if (comments.length > 0) {
+          commentGroups.push({ schedule, comments });
+        }
+      }
+      const formHtml = scheduleList.length > 0 ? renderCommentPostFormToHtml(scheduleList) : "";
+      applyCommentPanel(formHtml + renderCommentGroupsToHtml(commentGroups));
+    }
+
+    // 【前提】currentSelectedProjectIdが設定済みであること。
+    // 【処理】投稿フォームの選択スケジュールid・テキストを読み取り、空でなければ
+    //   addCommentで保存する。
+    // 【結果】投稿後、パネルを再描画する。
+    async function handlePostCommentButtonClick() {
+      const scheduleSelect = document.getElementById("commentTargetScheduleSelect");
+      const textInput = document.getElementById("commentTextInput");
+      if (!scheduleSelect || !textInput) return;
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addComment({ id: generateId(), taskId: scheduleSelect.value, text, createdAt: new Date().toISOString() });
+      await refreshCommentPanel(currentSelectedProjectId);
+    }
+
+    // ===== P6：変更履歴パネル =====
+    // 【設計判断】「戻す」機能（snapshotフィールドを1件書き戻す）は複合操作のため別工程とし、
+    //   今回は一覧表示とフィルタタブのみを実装する。
+
+    // 現在のフィルタ（"all" | "add" | "edit" | "delete"）。
+    let currentChangelogFilter = "all";
+    // フィルタ切替時にDB再取得しないためのキャッシュ。
+    let currentChangelogEntries = [];
+
+    // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件。filter は
+    //   "all" | "add" | "edit" | "delete"。
+    // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
+    //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。
+    // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderChangelogEntriesToHtml(changelogEntries, filter) {
+      const filteredEntries = changelogEntries
+        .filter((entry) => filter === "all" || entry.action === filter)
+        .slice()
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      if (filteredEntries.length === 0) {
+        return '<p class="empty-state-message">変更履歴がありません。</p>';
+      }
+      const actionLabels = { add: "追加", edit: "変更", delete: "削除" };
+      return filteredEntries
+        .map((entry) => {
+          const actionLabel = actionLabels[entry.action] || entry.action;
+          return `<div class="panel-list-item">
+            <div class="panel-list-item-main">
+              <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
+              ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
+              <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
+            </div>
+          </div>`;
+        })
+        .join("");
+    }
+
+    function applyChangelogPanel(bodyHtml) {
+      document.getElementById("changelogPanelBody").innerHTML = bodyHtml;
+    }
+
+    // 【前提】projectId はnull、または実在するプロジェクトのid。
+    // 【処理】getChangelogByProjectで取得してcurrentChangelogEntriesにキャッシュし、
+    //   現在のフィルタで描画する。
+    // 【結果】変更履歴パネルの表示が最新の状態に更新される。
+    async function refreshChangelogPanel(projectId) {
+      if (!projectId) {
+        applyChangelogPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        return;
+      }
+      currentChangelogEntries = await getChangelogByProject(projectId);
+      applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
+    }
+
+    // 【前提】filter は "all" | "add" | "edit" | "delete"。buttonElement はクリックされたボタン。
+    // 【処理】フィルタを切り替え、ボタンの選択状態を更新した上で、キャッシュ済み
+    //   currentChangelogEntriesを使ってパネルだけを再描画する（DB再取得は不要）。
+    // 【結果】変更履歴パネルの表示が新しいフィルタの内容になる。
+    function handleChangelogFilterClick(filter, buttonElement) {
+      currentChangelogFilter = filter;
+      for (const tabButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
+        tabButton.classList.toggle("is-active", tabButton === buttonElement);
+      }
+      applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
+    }
+
     // refreshGanttPanelと同じ考え方。対象はissues・マインドマップキャンバス。
     async function refreshMindmapPanel(projectId) {
       if (!projectId) {
@@ -2533,9 +3213,11 @@
     // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
     function renderScheduleModalToHtml(schedule, hasChildren) {
       const isEditMode = Boolean(schedule);
+      // カレンダー系入力の初期値は「今日」にする（ユーザー指示）。編集時は既存値をそのまま使う。
+      const todayDateString = new Date().toISOString().slice(0, 10);
       const nameValue = isEditMode ? schedule.name : "";
-      const startDateValue = isEditMode ? schedule.startDate : "";
-      const endDateValue = isEditMode ? schedule.endDate : "";
+      const startDateValue = isEditMode ? schedule.startDate : todayDateString;
+      const endDateValue = isEditMode ? schedule.endDate : todayDateString;
       const assigneeValue = isEditMode ? schedule.assignee : "";
       const taskStatusValue = isEditMode ? schedule.taskStatus : "todo";
       const notesValue = isEditMode ? schedule.notes : "";
@@ -2737,6 +3419,35 @@
       const currentOrder = currentSchedule.order;
       await addSchedule({ ...currentSchedule, order: swapSchedule.order });
       await addSchedule({ ...swapSchedule, order: currentOrder });
+      await refreshGanttPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】draggedId は掴んで動かしたスケジュールのid。targetId はドロップ先の行のid。
+    //   同じidの場合、または親（parentId）が異なる場合（基本設計書4.1節「並び替えは同一階層
+    //   内でのみ可能」）は何もしない。
+    // 【処理】ドラッグ対象と同じ兄弟グループ内で、ドロップ先の位置へドラッグ対象を移動し、
+    //   兄弟全員のorderを0番から振り直して保存する（クリックでの上下移動は隣接swapで済むが、
+    //   ドラッグは任意の位置へ一気に移動できるため、隣接swapでは対応できず全員の振り直しが必要）。
+    // 【結果】兄弟内の並び順が変わり、ガントパネルが再描画される。
+    async function handleScheduleDragDrop(draggedId, targetId) {
+      if (draggedId === targetId) return;
+      const draggedRow = currentScheduleTreeRows.find((row) => row.schedule.id === draggedId);
+      const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === targetId);
+      if (!draggedRow || !targetRow) return;
+      if (draggedRow.schedule.parentId !== targetRow.schedule.parentId) return;
+
+      const siblingSchedules = currentScheduleTreeRows
+        .filter((row) => row.schedule.parentId === draggedRow.schedule.parentId)
+        .map((row) => row.schedule)
+        .sort((a, b) => a.order - b.order);
+      const fromIndex = siblingSchedules.findIndex((schedule) => schedule.id === draggedId);
+      const toIndex = siblingSchedules.findIndex((schedule) => schedule.id === targetId);
+      const [movedSchedule] = siblingSchedules.splice(fromIndex, 1);
+      siblingSchedules.splice(toIndex, 0, movedSchedule);
+
+      for (let index = 0; index < siblingSchedules.length; index++) {
+        await addSchedule({ ...siblingSchedules[index], order: index });
+      }
       await refreshGanttPanel(currentSelectedProjectId);
     }
 
@@ -2987,6 +3698,104 @@
         const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
       });
+      // ドラッグ＆ドロップによる並び替え（上下矢印ボタンと併用。同じ兄弟グループ内のみ有効
+      // ＝handleScheduleDragDrop側でparentId一致を判定する）。
+      document.getElementById("wbsPanel").addEventListener("dragstart", (event) => {
+        const draggedRow = event.target.closest(".wbs-row[data-schedule-id]");
+        if (!draggedRow) return;
+        draggedScheduleId = draggedRow.dataset.scheduleId;
+        event.dataTransfer.effectAllowed = "move";
+      });
+      document.getElementById("wbsPanel").addEventListener("dragover", (event) => {
+        // ドロップを許可するにはdragoverでpreventDefault()が必須（ブラウザの既定動作）。
+        if (event.target.closest(".wbs-row[data-schedule-id]")) event.preventDefault();
+      });
+      document.getElementById("wbsPanel").addEventListener("drop", (event) => {
+        const targetRow = event.target.closest(".wbs-row[data-schedule-id]");
+        if (!targetRow || !draggedScheduleId) return;
+        event.preventDefault();
+        handleScheduleDragDrop(draggedScheduleId, targetRow.dataset.scheduleId);
+        draggedScheduleId = null;
+      });
+
+      // P2〜P6：右側スライドパネルの開閉配線。5パネルとも「ボタンでトグル開閉・
+      // 開いた瞬間に最新データへ再描画・×ボタンで必ず閉じる」という共通の挙動のため、
+      // 定義テーブル1つと共通のwire関数にまとめる（P1タスク管理は既存の専用ハンドラの
+      // ままとし、ここでは触れない）。
+      const SIDE_PANEL_DEFINITIONS = [
+        { panelId: "snapshotSlidePanel", buttonId: "snapshotButton", closeButtonId: "closeSnapshotPanelButton", onOpen: () => refreshSnapshotPanel(currentSelectedProjectId) },
+        { panelId: "quickMemoSlidePanel", buttonId: "quickMemoButton", closeButtonId: "closeQuickMemoPanelButton", onOpen: () => refreshQuickMemoPanel(currentSelectedProjectId) },
+        { panelId: "memoSlidePanel", buttonId: "memoButton", closeButtonId: "closeMemoPanelButton", onOpen: () => refreshMemoPanel(currentSelectedProjectId) },
+        { panelId: "commentSlidePanel", buttonId: "commentButton", closeButtonId: "closeCommentPanelButton", onOpen: () => refreshCommentPanel(currentSelectedProjectId) },
+        { panelId: "changelogSlidePanel", buttonId: "changelogButton", closeButtonId: "closeChangelogPanelButton", onOpen: () => refreshChangelogPanel(currentSelectedProjectId) },
+      ];
+      for (const definition of SIDE_PANEL_DEFINITIONS) {
+        document.getElementById(definition.buttonId).addEventListener("click", () => {
+          toggleSlidePanel(definition.panelId);
+          const isOpen = document.getElementById(definition.panelId).classList.contains("is-open");
+          document.getElementById(definition.buttonId).classList.toggle("is-active", isOpen);
+          if (isOpen) definition.onOpen();
+        });
+        document.getElementById(definition.closeButtonId).addEventListener("click", () => {
+          closeSlidePanel(definition.panelId);
+          document.getElementById(definition.buttonId).classList.remove("is-active");
+        });
+      }
+
+      // P2：スナップショットの保存・削除（削除はイベント委譲。パネルはrefreshのたびに再生成）。
+      document.getElementById("saveSnapshotButton").addEventListener("click", handleSaveSnapshotButtonClick);
+      document.getElementById("snapshotPanelBody").addEventListener("click", (event) => {
+        const deleteButton = event.target.closest('[data-action="delete-snapshot"]');
+        if (!deleteButton) return;
+        const item = deleteButton.closest("[data-snapshot-id]");
+        if (item) handleDeleteSnapshotButtonClick(item.dataset.snapshotId);
+      });
+
+      // P3：即時メモの投稿（クリック・Ctrl+Enter）・削除（イベント委譲）。
+      document.getElementById("postQuickMemoButton").addEventListener("click", handlePostQuickMemoButtonClick);
+      document.getElementById("quickMemoTextInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && event.ctrlKey) handlePostQuickMemoButtonClick();
+      });
+      document.getElementById("quickMemoPanelBody").addEventListener("click", (event) => {
+        const deleteButton = event.target.closest('[data-action="delete-quick-memo"]');
+        if (!deleteButton) return;
+        const item = deleteButton.closest("[data-quick-memo-id]");
+        if (item) handleDeleteQuickMemoButtonClick(item.dataset.quickMemoId);
+      });
+
+      // P4：メモの新規作成・選択・削除（一覧側）・自動保存（編集エリア側、blurで発火）。
+      document.getElementById("createMemoButton").addEventListener("click", handleCreateMemoButtonClick);
+      document.getElementById("memoListBody").addEventListener("click", (event) => {
+        const deleteButton = event.target.closest('[data-action="delete-memo"]');
+        if (deleteButton) {
+          const item = deleteButton.closest("[data-memo-id]");
+          if (item) handleDeleteMemoButtonClick(item.dataset.memoId);
+          return;
+        }
+        const selectItem = event.target.closest('[data-action="select-memo"]');
+        if (selectItem) handleSelectMemoButtonClick(selectItem.dataset.memoId);
+      });
+      // 編集エリアはrefreshMemoPanelのたびに再生成されるため、フォーカスアウトの委譲は
+      // キャプチャフェーズ（blurはバブリングしないため）で親要素に持たせる。
+      document.getElementById("memoEditorBody").addEventListener(
+        "blur",
+        (event) => {
+          if (event.target.id === "memoEditorTitleInput" || event.target.id === "memoEditorBodyTextarea") {
+            handleMemoEditorFieldBlur();
+          }
+        },
+        true
+      );
+
+      // P5：コメントの投稿（イベント委譲。フォームは再描画のたびに作り直されるため）。
+      document.getElementById("commentPanelBody").addEventListener("click", (event) => {
+        if (event.target.id === "postCommentButton") handlePostCommentButtonClick();
+      });
+
+      // P6：変更履歴のフィルタタブ。
+      for (const filterButton of document.querySelectorAll("#changelogFilterTabs .toolbar-button")) {
+        filterButton.addEventListener("click", () => handleChangelogFilterClick(filterButton.dataset.changelogFilter, filterButton));
+      }
 
       const projectList = await getAllProjects();
       await refreshProjectSelectDropdown();
