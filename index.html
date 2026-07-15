@@ -707,6 +707,28 @@
       border-color: var(--color-text-dark);
     }
 
+    /* M4：スケジュール編集モーダル内のコメント欄（既存スケジュールのみ表示） */
+    .modal-comment-list {
+      max-height: 160px;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      margin-bottom: 8px;
+    }
+
+    .modal-comment-list .panel-list-item {
+      padding: 6px 10px;
+    }
+
+    .modal-comment-post-form {
+      display: flex;
+      gap: 8px;
+    }
+
+    .modal-comment-post-form input {
+      flex: 1;
+    }
+
     .modal-actions {
       display: flex;
       justify-content: flex-end;
@@ -905,12 +927,14 @@
       resize: vertical;
     }
 
-    /* P5：コメント一覧はスケジュール単位でグルーピングする */
+    /* P5：コメント一覧はスケジュール単位でグルーピングする（見出しクリックで開閉） */
     .comment-group-heading {
       padding: 8px 16px 4px;
       font-weight: 600;
       color: var(--color-primary-navy);
       background: var(--color-surface-2);
+      cursor: pointer;
+      user-select: none;
     }
 
     /* P6：変更履歴のフィルタタブ */
@@ -2010,6 +2034,9 @@
     // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
     // DB非保存の画面上だけの一時状態にする。
     const collapsedMindmapIssueIds = new Set();
+    // P5コメントパネルで折りたたまれているスケジュールidの集合。collapsedScheduleIdsと
+    // 同じ理由でDB非保存の画面上だけの一時状態にする。
+    const collapsedCommentGroupScheduleIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
     // ドラッグ操作中のタスクid（カンバンのカード）。draggedScheduleIdと同じ理由・同じ寿命。
@@ -3181,28 +3208,38 @@
     //   簡易フォームを暫定的に置く（スコープの妥協点）。
 
     // 【前提】commentGroups は [{schedule, comments}] の配列（コメントが1件以上ある
-    //   スケジュールのみ）。
-    // 【処理】スケジュール名を見出しに、コメント本文・投稿日時を並べたHTML文字列を組み立てる。
+    //   スケジュールのみ）。collapsedScheduleIds は見出しクリックで折りたたまれている
+    //   スケジュールidの集合。
+    // 【処理】スケジュール名を見出しに、コメント本文・投稿日時・削除ボタンを並べたHTML文字列を
+    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しの矢印を
+    //   ▼→▶に切り替える（中身は非表示だが件数はグルーピング自体には影響しない）。
     // 【結果】commentPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderCommentGroupsToHtml(commentGroups) {
+    function renderCommentGroupsToHtml(commentGroups, collapsedScheduleIds) {
       if (commentGroups.length === 0) {
         return '<p class="empty-state-message">コメントがありません。</p>';
       }
       return commentGroups
         .map(({ schedule, comments }) => {
-          const commentsHtml = comments
-            .slice()
-            .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
-            .map(
-              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+          const isGroupCollapsed = collapsedScheduleIds.has(schedule.id);
+          const commentsHtml = isGroupCollapsed
+            ? ""
+            : comments
+                .slice()
+                .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+                .map(
+                  (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
                 <div class="panel-list-item-main">
                   <div>${escapeHtmlText(comment.text)}</div>
                   <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
                 </div>
+                <div class="panel-list-item-actions">
+                  <button type="button" class="wbs-icon-button" data-action="delete-comment" title="削除">🗑</button>
+                </div>
               </div>`
-            )
-            .join("");
-          return `<div class="comment-group-heading">${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
+                )
+                .join("");
+          const toggleIcon = isGroupCollapsed ? "▶" : "▼";
+          return `<div class="comment-group-heading" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}">${toggleIcon} ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
         })
         .join("");
     }
@@ -3243,7 +3280,28 @@
         }
       }
       const formHtml = scheduleList.length > 0 ? renderCommentPostFormToHtml(scheduleList) : "";
-      applyCommentPanel(formHtml + renderCommentGroupsToHtml(commentGroups));
+      applyCommentPanel(formHtml + renderCommentGroupsToHtml(commentGroups, collapsedCommentGroupScheduleIds));
+    }
+
+    // 【前提】scheduleId は見出しをクリックされたスケジュールのid。
+    // 【処理】collapsedCommentGroupScheduleIdsへの追加/削除だけを行い、パネルを再描画する
+    //   （折りたたみ状態はDB非保存の画面上だけの一時状態。collapsedScheduleIdsと同じ設計）。
+    // 【結果】対象グループのコメント本文一覧が表示/非表示になる。
+    function handleToggleCommentGroupButtonClick(scheduleId) {
+      if (collapsedCommentGroupScheduleIds.has(scheduleId)) {
+        collapsedCommentGroupScheduleIds.delete(scheduleId);
+      } else {
+        collapsedCommentGroupScheduleIds.add(scheduleId);
+      }
+      refreshCommentPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】commentId は削除したいコメントのid。
+    // 【処理】即時メモの個別削除と同じ方針（確認なし即削除）でdeleteCommentする。
+    // 【結果】削除後、パネルを再描画する。
+    async function handleDeleteCommentButtonClick(commentId) {
+      await deleteComment(commentId);
+      await refreshCommentPanel(currentSelectedProjectId);
     }
 
     // 【前提】currentSelectedProjectIdが設定済みであること。
@@ -3699,7 +3757,41 @@
     //   読み取り専用にする。基本設計書4.2節）。
     // 【処理】M4（スケジュール新規作成・編集）モーダルのHTML文字列を組み立てる。
     // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
-    function renderScheduleModalToHtml(schedule, hasChildren) {
+    // 【前提】comments は対象スケジュールに紐づくコメント全件（無ければ空配列）。
+    // 【処理】投稿日時の昇順（古い順）に並べ、各コメントに削除ボタンを添えた一覧と、
+    //   末尾に投稿フォームを組み立てる（モーダル・ダイアログ一覧M4：コメントは
+    //   既存スケジュールの編集モーダル内に埋め込む仕様）。
+    // 【結果】コメント欄のHTML文字列を返す。
+    function renderModalCommentSectionToHtml(comments) {
+      const sortedComments = comments.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const commentListHtml = sortedComments.length > 0
+        ? sortedComments
+            .map(
+              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+                <div class="panel-list-item-main">
+                  <div>${escapeHtmlText(comment.text)}</div>
+                  <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
+                </div>
+                <div class="panel-list-item-actions">
+                  <button type="button" class="wbs-icon-button" data-action="delete-modal-comment" title="削除">🗑</button>
+                </div>
+              </div>`
+            )
+            .join("")
+        : '<p class="empty-state-message">コメントはまだありません。</p>';
+      return `
+        <div class="modal-field">
+          <label>コメント</label>
+          <div class="modal-comment-list">${commentListHtml}</div>
+          <div class="modal-comment-post-form">
+            <input type="text" id="scheduleModalCommentTextInput" placeholder="コメントを入力">
+            <button type="button" class="panel-add-button" id="scheduleModalPostCommentButton">投稿</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderScheduleModalToHtml(schedule, hasChildren, comments) {
       const isEditMode = Boolean(schedule);
       // カレンダー系入力の初期値は「今日」にする（ユーザー指示）。編集時は既存値をそのまま使う。
       const todayDateString = new Date().toISOString().slice(0, 10);
@@ -3754,6 +3846,7 @@
           <label for="scheduleModalNotesTextarea">メモ</label>
           <textarea id="scheduleModalNotesTextarea" rows="3">${escapeHtmlText(notesValue)}</textarea>
         </div>
+        ${isEditMode ? renderModalCommentSectionToHtml(comments) : ""}
         <div class="modal-actions">
           <button type="button" class="modal-button-secondary" id="scheduleModalCancelButton">キャンセル</button>
           <button type="button" class="modal-button-primary" id="scheduleModalSaveButton">保存</button>
@@ -3764,10 +3857,14 @@
     // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
     //   presetParentId は新規作成時にあらかじめ決めておく親id（ルート作成ならnull、
     //   子スケジュール追加ボタンから開く場合はそのスケジュールのid）。編集時は使わない。
-    // 【処理】スケジュールモーダルを開き、キャンセル・保存・カラーパレットの選択にイベントを登録する。
+    // 【処理】既存スケジュールの場合のみgetCommentsByTaskでコメントを取得してから
+    //   モーダルを開き、キャンセル・保存・カラーパレット・コメント投稿/削除の
+    //   イベントを登録する（コメント欄はモーダルの再描画のたびに新しいDOM要素になるため、
+    //   カラースワッチと同じく直接addEventListenerしてよい＝二重登録の心配はない）。
     // 【結果】モーダルが操作可能な状態で表示される。
-    function openScheduleModal(existingSchedule, hasChildren, presetParentId) {
-      openModal(renderScheduleModalToHtml(existingSchedule, hasChildren));
+    async function openScheduleModal(existingSchedule, hasChildren, presetParentId) {
+      const comments = existingSchedule ? await getCommentsByTask(existingSchedule.id) : [];
+      openModal(renderScheduleModalToHtml(existingSchedule, hasChildren, comments));
       document.getElementById("scheduleModalCancelButton").addEventListener("click", closeModal);
       document.getElementById("scheduleModalSaveButton").addEventListener("click", () => handleScheduleModalSaveButtonClick(existingSchedule, presetParentId));
       for (const swatch of document.querySelectorAll(".modal-color-swatch")) {
@@ -3778,6 +3875,34 @@
           swatch.classList.add("is-selected");
         });
       }
+      if (existingSchedule) {
+        document.getElementById("scheduleModalPostCommentButton").addEventListener("click", () => handlePostModalCommentButtonClick(existingSchedule, hasChildren));
+        for (const deleteButton of document.querySelectorAll('[data-action="delete-modal-comment"]')) {
+          const commentId = deleteButton.closest("[data-comment-id]").dataset.commentId;
+          deleteButton.addEventListener("click", () => handleDeleteModalCommentButtonClick(commentId, existingSchedule, hasChildren));
+        }
+      }
+    }
+
+    // 【前提】schedule は編集中のスケジュール（コメント欄はこの場合のみ表示される）。
+    //   hasChildren はそのスケジュールが子を持つか（モーダル再描画時に必要な情報）。
+    // 【処理】コメント入力欄のテキストを読み取り、空でなければaddCommentで保存する。
+    // 【結果】投稿後、同じ編集モーダルを再度開き直して最新のコメント一覧を表示する。
+    async function handlePostModalCommentButtonClick(schedule, hasChildren) {
+      const textInput = document.getElementById("scheduleModalCommentTextInput");
+      if (!textInput) return;
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addComment({ id: generateId(), taskId: schedule.id, text, createdAt: new Date().toISOString() });
+      await openScheduleModal(schedule, hasChildren, null);
+    }
+
+    // 【前提】commentId は削除したいコメントのid。schedule・hasChildrenはモーダル再描画用。
+    // 【処理】即時メモの個別削除と同じ方針（確認なし即削除）でdeleteCommentする。
+    // 【結果】削除後、同じ編集モーダルを再度開き直す。
+    async function handleDeleteModalCommentButtonClick(commentId, schedule, hasChildren) {
+      await deleteComment(commentId);
+      await openScheduleModal(schedule, hasChildren, null);
     }
 
     function handleAddScheduleButtonClick() {
@@ -4708,9 +4833,21 @@
         true
       );
 
-      // P5：コメントの投稿（イベント委譲。フォームは再描画のたびに作り直されるため）。
+      // P5：コメントの投稿・削除・グループ開閉（イベント委譲。パネルは再描画のたびに
+      //   作り直されるため）。
       document.getElementById("commentPanelBody").addEventListener("click", (event) => {
-        if (event.target.id === "postCommentButton") handlePostCommentButtonClick();
+        if (event.target.id === "postCommentButton") {
+          handlePostCommentButtonClick();
+          return;
+        }
+        const deleteButton = event.target.closest('[data-action="delete-comment"]');
+        if (deleteButton) {
+          const item = deleteButton.closest("[data-comment-id]");
+          if (item) handleDeleteCommentButtonClick(item.dataset.commentId);
+          return;
+        }
+        const toggleHeading = event.target.closest('[data-action="toggle-comment-group"]');
+        if (toggleHeading) handleToggleCommentGroupButtonClick(toggleHeading.dataset.scheduleId);
       });
 
       // P6：変更履歴のフィルタタブ・全削除ボタン・「戻す」ボタン（後者2つはイベント委譲。
