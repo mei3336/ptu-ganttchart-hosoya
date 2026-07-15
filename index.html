@@ -321,6 +321,52 @@
       const store = transaction.objectStore(STORE_TASKS);
       return promisifyRequest(store.delete(taskId), transaction);
     }
+
+    // ===== comments ストアのCRUD =====
+
+    // comments の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
+    // （いずれも STORE_DEFINITIONS の comments 定義と同じ値を指す）。
+    const STORE_COMMENTS = "comments";
+    const INDEX_COMMENTS_BY_TASK = "by_taskId";
+
+    // 【前提】comment は id を含む1件分のコメントオブジェクト（id は呼び出し側で採番済み）。
+    //   comments は projectId を持たない設計（taskId → schedules.projectId で辿るため。
+    //   データモデル設計3.5節：正規化の観点で重複保持しない）。
+    // 【処理】読み書きトランザクションで comments ストアに put する（upsert）。
+    // 【結果】コミット完了後に resolve する（＝保存が確定したことを保証）。
+    async function addComment(comment) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_COMMENTS, "readwrite");
+      const store = transaction.objectStore(STORE_COMMENTS);
+      return promisifyRequest(store.put(comment), transaction);
+    }
+
+    // 【前提】taskId は絞り込みたいスケジュールの id（schedules.id を指す）。
+    // 【処理】by_taskId インデックスを使い、そのスケジュールに紐づくコメントを全て取得する。
+    // 【結果】コメントの配列を resolve する（0件なら空配列）。
+    //   ※「プロジェクト単位のコメント一覧」はこの関数だけでは作れない（comments はprojectIdを
+    //     持たないため）。データモデル設計3.5節の方針どおり、呼び出し側が
+    //     getSchedulesByProject でスケジュールID集合を先に取得し、その各IDについてこの関数を
+    //     呼んで束ねる（複数ストアをまたぐ合成処理のため、この関数の責務には含めない）。
+    async function getCommentsByTask(taskId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_COMMENTS, "readonly");
+      const index = transaction.objectStore(STORE_COMMENTS).index(INDEX_COMMENTS_BY_TASK);
+      return promisifyRequest(index.getAll(taskId), transaction);
+    }
+
+    // 【前提】commentId は削除したいコメントの id。
+    // 【処理】comments ストアから該当1件“だけ”を削除する低レベル部品。
+    //   ※スケジュール削除時にそのスケジュールへのコメントも連鎖削除する仕様（基本設計書L156）が
+    //   あるが、それは deleteSchedule 側の複合削除操作からこの関数を呼ぶ形で後日実装する
+    //   （データモデル設計6章：複数ストアにまたがる書き込みは読み切ってから行う方針）。
+    // 【結果】コミット完了後に resolve する（対象が存在しなくても delete はエラーにならない＝冪等）。
+    async function deleteComment(commentId) {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_COMMENTS, "readwrite");
+      const store = transaction.objectStore(STORE_COMMENTS);
+      return promisifyRequest(store.delete(commentId), transaction);
+    }
   </script>
 </body>
 </html>
