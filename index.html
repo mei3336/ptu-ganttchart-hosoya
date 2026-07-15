@@ -299,6 +299,12 @@
       background: rgba(220, 38, 38, .05);
     }
 
+    /* 週/1ヶ月/3ヶ月表示では土日という概念が意味を持たないため、縞模様で列の区切りだけを示す。 */
+    .gantt-day-column-bg.is-alt-period {
+      background: var(--color-surface-3);
+      opacity: .4;
+    }
+
     /* バーの視覚仕様（UIデザイン仕様書3章）：親行は太め・角丸大きめで行中央、
        子（葉）行は薄めで行の65%あたりの位置。完了ステータスは不透明度を下げる。 */
     .gantt-bar {
@@ -418,6 +424,16 @@
       color: var(--color-text-light);
       padding: 16px;
     }
+
+    /* ガント本体が0件のとき、列（背景の縞模様）はそのまま描画した上に
+       メッセージだけを重ねて表示する（列自体を消さない）。 */
+    .gantt-empty-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      padding: 0;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -442,11 +458,10 @@
     <div class="header-group">
       <button id="lockToggleButton" class="toolbar-button" type="button">🔒 ロック</button>
       <button id="addScheduleButton" class="toolbar-button" type="button">＋ スケジュール追加</button>
-      <!-- 表示粒度は「日」のみ実装（週/月表示は別工程）。ボタンは視覚的に揃えるが「日」以外は無効化する。 -->
-      <button class="toolbar-button is-active" type="button" disabled>日</button>
-      <button class="toolbar-button" type="button" disabled>週</button>
-      <button class="toolbar-button" type="button" disabled>1ヶ月</button>
-      <button class="toolbar-button" type="button" disabled>3ヶ月</button>
+      <button class="toolbar-button is-active" type="button" data-granularity="day">日</button>
+      <button class="toolbar-button" type="button" data-granularity="week">週</button>
+      <button class="toolbar-button" type="button" data-granularity="month">1ヶ月</button>
+      <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
       <button class="toolbar-button" type="button" data-out-of-scope-label="全て開く・全て閉じる">全て開く／閉じる</button>
       <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
@@ -1344,8 +1359,11 @@
     // taskStatus（"todo"|"inprogress"|"done"）の日本語表示名（データモデル設計3.2節）。
     const SCHEDULE_STATUS_LABELS = { todo: "未着手", inprogress: "進行中", done: "完了" };
 
-    // ガント1日あたりの描画幅（px）。表示粒度は「日」のみ実装するため固定値とする。
-    const PIXELS_PER_DAY = 32;
+    // ガント1日あたりの描画幅（px）。表示粒度（日/週/1ヶ月/3ヶ月）ごとに、全体の横幅が
+    // 極端に長大化しないよう、粒度が粗くなるほど1日あたりの幅を狭くする。
+    const GRANULARITY_PIXELS_PER_DAY = { day: 32, week: 6, month: 2.2, quarter: 0.9 };
+    // 現在選択中の表示粒度（"day" | "week" | "month" | "quarter"）。
+    let currentGranularity = "day";
     // ガント1行の高さ（px）。CSS変数 --gantt-row-height と同じ値を保つこと（JS側で絶対配置の
     // 計算に使うため、CSSだけでなくJS定数としても持つ）。
     const GANTT_ROW_HEIGHT_PX = 44;
@@ -1561,48 +1579,161 @@
       return headerHtml + rowsHtml;
     }
 
-    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。
-    // 【処理】年月ラベル（連続する同年月をまとめて幅を合算）と、日付見出し（土日で背景色を変える）
-    //   のHTML文字列を組み立てる（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
-    //   年月40px＋日付42px相当として配分）。
-    // 【結果】gantt-timeline-headerのHTML文字列を返す。
-    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) {
-      const monthLabelsHtml = [];
-      let groupStartIndex = 0;
-      for (let index = 1; index <= timelineDays.length; index++) {
-        const isGroupBoundary =
-          index === timelineDays.length ||
-          timelineDays[index].year !== timelineDays[groupStartIndex].year ||
-          timelineDays[index].month !== timelineDays[groupStartIndex].month;
-        if (!isGroupBoundary) continue;
-        const groupDayCount = index - groupStartIndex;
-        const { year, month } = timelineDays[groupStartIndex];
-        monthLabelsHtml.push(
-          `<div class="gantt-month-label" style="left:${groupStartIndex * pixelsPerDay}px;width:${groupDayCount * pixelsPerDay}px">${year}年${month}月</div>`
-        );
-        groupStartIndex = index;
+    // 【前提】month は1〜12の整数。
+    // 【処理】月から四半期番号（1〜4）を求める（Q1=1-3月, Q2=4-6月, Q3=7-9月, Q4=10-12月）。
+    // 【結果】四半期番号を返す。
+    function calculateQuarterNumber(month) {
+      return Math.ceil(month / 3);
+    }
+
+    // 【設計判断：なぜtimelineDaysは常に「日」単位のままなのか】
+    //   表示粒度（日/週/1ヶ月/3ヶ月）が変わっても、buildGanttTimelineDaysが返す「プロジェクト
+    //   全期間ぶんの日単位配列」自体は作り直さない。粒度ごとの見出し・列幅は、この日単位配列を
+    //   「どうグルーピングするか」だけを変えて表現する。こうすることで、
+    //   ①スケジュール件数に関係なくプロジェクト全期間の列が必ず生成される（今回の不具合の根本原因は
+    //   　0件時に本体の描画自体を早期returnでスキップしていたこと。グルーピング元を「常に完全な
+    //   　日単位配列」に統一し、行の有無と列の生成を分離することで解消する）、
+    //   ②粒度切替のたびに日付計算をやり直さずに済む、という2つの利点がある。
+    //
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値（必ずプロジェクト全期間ぶん）。
+    //   granularity は "day" | "week" | "month" | "quarter"。
+    // 【処理】1段目（大分類の見出し）・2段目（詳細列の見出し）を、指定した粒度でグルーピングする。
+    //   - day：2段目=1日ごと（日付）／1段目=同年月をまとめた「年月」
+    //   - week：2段目=7日ごと（先頭日の月/日）／1段目=先頭日が属する「年月」
+    //   - month：2段目=暦月ごと（月）／1段目=同じ（年,四半期）をまとめた「年 Q数」
+    //   - quarter：2段目=暦四半期ごと（Q数（開始月-終了月月））／1段目=同じ年をまとめた「年」
+    //   いずれの粒度でも、timelineDaysの全区間を漏れなくグループ化する（途中で打ち切らない）。
+    // 【結果】{ level1Groups, level2Groups } を返す。各グループは
+    //   { label, startIndex, dayCount } を持ち、startIndex/dayCountはtimelineDays配列上の
+    //   位置・日数（px座標の計算にそのまま使える）。
+    function buildGanttTimelineHeaderGroups(timelineDays, granularity) {
+      const level2Groups = [];
+
+      if (granularity === "day") {
+        timelineDays.forEach((day, index) => {
+          level2Groups.push({
+            label: String(day.dayOfMonth),
+            startIndex: index,
+            dayCount: 1,
+            level1Key: `${day.year}-${day.month}`,
+            level1Label: `${day.year}年${day.month}月`,
+          });
+        });
+      } else if (granularity === "week") {
+        for (let startIndex = 0; startIndex < timelineDays.length; startIndex += 7) {
+          const dayCount = Math.min(7, timelineDays.length - startIndex);
+          const firstDay = timelineDays[startIndex];
+          level2Groups.push({
+            label: `${firstDay.month}/${firstDay.dayOfMonth}`,
+            startIndex,
+            dayCount,
+            level1Key: `${firstDay.year}-${firstDay.month}`,
+            level1Label: `${firstDay.year}年${firstDay.month}月`,
+          });
+        }
+      } else if (granularity === "month") {
+        let groupStartIndex = 0;
+        for (let index = 1; index <= timelineDays.length; index++) {
+          const isBoundary =
+            index === timelineDays.length ||
+            timelineDays[index].year !== timelineDays[groupStartIndex].year ||
+            timelineDays[index].month !== timelineDays[groupStartIndex].month;
+          if (!isBoundary) continue;
+          const { year, month } = timelineDays[groupStartIndex];
+          const quarter = calculateQuarterNumber(month);
+          level2Groups.push({
+            label: `${month}月`,
+            startIndex: groupStartIndex,
+            dayCount: index - groupStartIndex,
+            level1Key: `${year}-Q${quarter}`,
+            level1Label: `${year}年 Q${quarter}`,
+          });
+          groupStartIndex = index;
+        }
+      } else if (granularity === "quarter") {
+        let groupStartIndex = 0;
+        for (let index = 1; index <= timelineDays.length; index++) {
+          const currentQuarter = calculateQuarterNumber(timelineDays[groupStartIndex].month);
+          const isBoundary =
+            index === timelineDays.length ||
+            timelineDays[index].year !== timelineDays[groupStartIndex].year ||
+            calculateQuarterNumber(timelineDays[index].month) !== currentQuarter;
+          if (!isBoundary) continue;
+          const { year } = timelineDays[groupStartIndex];
+          const quarterStartMonth = (currentQuarter - 1) * 3 + 1;
+          const quarterEndMonth = quarterStartMonth + 2;
+          level2Groups.push({
+            label: `Q${currentQuarter}（${quarterStartMonth}-${quarterEndMonth}月）`,
+            startIndex: groupStartIndex,
+            dayCount: index - groupStartIndex,
+            level1Key: `${year}`,
+            level1Label: `${year}年`,
+          });
+          groupStartIndex = index;
+        }
       }
 
-      const dayHeadersHtml = timelineDays
-        .map((day, index) => {
-          const weekendClass = day.isSaturday ? " is-saturday" : day.isSunday ? " is-sunday" : "";
-          return `<div class="gantt-day-column-header${weekendClass}" style="left:${index * pixelsPerDay}px;width:${pixelsPerDay}px">${day.dayOfMonth}</div>`;
+      // 1段目は、連続するlevel2Groupsのうちlevel1Keyが同じものをまとめて1つの見出しにする。
+      const level1Groups = [];
+      for (const level2Group of level2Groups) {
+        const lastLevel1Group = level1Groups[level1Groups.length - 1];
+        if (lastLevel1Group && lastLevel1Group.level1Key === level2Group.level1Key) {
+          lastLevel1Group.dayCount += level2Group.dayCount;
+        } else {
+          level1Groups.push({
+            label: level2Group.level1Label,
+            level1Key: level2Group.level1Key,
+            startIndex: level2Group.startIndex,
+            dayCount: level2Group.dayCount,
+          });
+        }
+      }
+
+      return { level1Groups, level2Groups };
+    }
+
+    // 【前提】timelineDays は buildGanttTimelineDays の戻り値。granularity は表示粒度。
+    // 【処理】buildGanttTimelineHeaderGroupsで1段目・2段目の見出しグループを求め、
+    //   それぞれをHTML文字列化する（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
+    //   1段目40px＋2段目42px相当として配分）。土日の色分けは「日」表示のときのみ意味を持つ。
+    // 【結果】gantt-timeline-headerのHTML文字列を返す。
+    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) {
+      const { level1Groups, level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
+
+      const level1Html = level1Groups
+        .map(
+          (group) =>
+            `<div class="gantt-month-label" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px">${escapeHtmlText(group.label)}</div>`
+        )
+        .join("");
+
+      const level2Html = level2Groups
+        .map((group) => {
+          const firstDay = timelineDays[group.startIndex];
+          const weekendClass = granularity === "day" ? (firstDay.isSaturday ? " is-saturday" : firstDay.isSunday ? " is-sunday" : "") : "";
+          return `<div class="gantt-day-column-header${weekendClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px">${escapeHtmlText(group.label)}</div>`;
         })
         .join("");
 
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${monthLabelsHtml.join("")}${dayHeadersHtml}</div>`;
+      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${level1Html}${level2Html}</div>`;
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
     //   buildGanttTimelineDays の戻り値。milestones は project.milestones。
-    // 【処理】行の背景（縞模様＋土日列の色付け）、バー（親行は太め・中央配置、葉行は細め・
-    //   行の65%位置、完了ステータスは半透明）、マイルストーンの縦線＋ひし形マーカーを
-    //   すべて絶対配置のdivとして組み立てる（UIデザイン仕様書3章の視覚仕様に準拠）。
+    // 【処理】列の背景（「日」表示は土日の色分け、それ以外の粒度は縞模様）、行の背景、バー
+    //   （親行は太め・中央配置、葉行は細め・行の65%位置、完了ステータスは半透明）、
+    //   マイルストーンの縦線＋ひし形マーカーをすべて絶対配置のdivとして組み立てる
+    //   （UIデザイン仕様書3章の視覚仕様に準拠）。
+    // 【設計判断：スケジュール0件でも列は必ずプロジェクト全期間ぶん描画する】
+    //   以前は「0件なら本体を描画せずメッセージのみ」としていたため、列（背景の縞模様）自体が
+    //   全く生成されない不具合があった。列の生成（periodColumnsHtml）と行の生成
+    //   （rowBackgroundsHtml・barsHtml、0件なら単に空文字列になるだけ）を分離し、
+    //   0件時は「空状態メッセージを上に重ねて表示するが、列は最後まで描画されている」形にする。
     // 【結果】gantt-bodyのHTML文字列を返す。
-    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString) {
+    function renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      const totalHeightPx = scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX;
+      const totalHeightPx = Math.max(scheduleTreeRows.length * GANTT_ROW_HEIGHT_PX, GANTT_ROW_HEIGHT_PX);
 
       const rowBackgroundsHtml = scheduleTreeRows
         .map((_, rowIndex) => {
@@ -1611,11 +1742,18 @@
         })
         .join("");
 
-      const weekendColumnsHtml = timelineDays
-        .map((day, index) => {
-          if (!day.isSaturday && !day.isSunday) return "";
-          const weekendClass = day.isSaturday ? "is-saturday" : "is-sunday";
-          return `<div class="gantt-day-column-bg ${weekendClass}" style="left:${index * pixelsPerDay}px;width:${pixelsPerDay}px"></div>`;
+      const { level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
+      const periodColumnsHtml = level2Groups
+        .map((group, groupIndex) => {
+          const firstDay = timelineDays[group.startIndex];
+          let backgroundClass = "";
+          if (granularity === "day") {
+            backgroundClass = firstDay.isSaturday ? "is-saturday" : firstDay.isSunday ? "is-sunday" : "";
+          } else if (groupIndex % 2 === 1) {
+            backgroundClass = "is-alt-period";
+          }
+          if (!backgroundClass) return "";
+          return `<div class="gantt-day-column-bg ${backgroundClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px"></div>`;
         })
         .join("");
 
@@ -1644,19 +1782,22 @@
         )
         .join("");
 
-      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${rowBackgroundsHtml}${weekendColumnsHtml}${barsHtml}${milestoneMarkersHtml}</div>`;
+      const emptyMessageHtml =
+        scheduleTreeRows.length === 0 ? '<p class="empty-state-message gantt-empty-overlay">スケジュールがありません。</p>' : "";
+
+      return `<div class="gantt-body" style="width:${totalWidthPx}px;height:${totalHeightPx}px">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${emptyMessageHtml}</div>`;
     }
 
     // 【前提】scheduleTreeRows・timelineDays・milestonesは上記各関数の戻り値・入力と同じ。
+    //   granularityは表示粒度。
     // 【処理】タイムラインヘッダーとガント本体を連結する（ガントパネル全体の組み立て窓口）。
+    //   スケジュールが0件でも、ヘッダー・本体とも必ずプロジェクト全期間ぶんの列を描画する
+    //   （0件用の早期returnは行わない。今回修正した不具合の要点）。
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString) {
-      if (scheduleTreeRows.length === 0) {
-        return renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) + '<p class="empty-state-message">スケジュールがありません。</p>';
-      }
+    function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity) {
       return (
-        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay) +
-        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString)
+        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) +
+        renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity)
       );
     }
 
@@ -1765,9 +1906,17 @@
       currentScheduleTreeRows = buildScheduleTreeRows(scheduleList);
       currentTimelineStartDateString = currentProjectObject.startDate;
       const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
+      const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
       applyWbsPanel(renderWbsPanelToHtml(currentScheduleTreeRows, visibleWbsColumns));
       applyGanttPanel(
-        renderGanttChartToHtml(currentScheduleTreeRows, timelineDays, PIXELS_PER_DAY, currentProjectObject.milestones, currentProjectObject.startDate)
+        renderGanttChartToHtml(
+          currentScheduleTreeRows,
+          timelineDays,
+          pixelsPerDay,
+          currentProjectObject.milestones,
+          currentProjectObject.startDate,
+          currentGranularity
+        )
       );
     }
 
@@ -1944,7 +2093,20 @@
       if (!currentTimelineStartDateString) return;
       const todayDateString = new Date().toISOString().slice(0, 10);
       const dayOffset = calculateDayOffsetFromTimelineStart(todayDateString, currentTimelineStartDateString);
-      document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * PIXELS_PER_DAY - 100, 0);
+      const pixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
+      document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * pixelsPerDay - 100, 0);
+    }
+
+    // 【前提】granularity は "day" | "week" | "month" | "quarter"。buttonElement はクリックされたボタン。
+    // 【処理】表示粒度を切り替え、ボタンの選択状態を更新した上でガントパネルを再描画する
+    //   （DBへの再問い合わせは不要。currentProjectObjectの日付情報だけで再計算できるため）。
+    // 【結果】ガントチャートが新しい粒度の見出し・列幅で再描画される。
+    function handleGranularityButtonClick(granularity, buttonElement) {
+      currentGranularity = granularity;
+      for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
+        granularityButton.classList.toggle("is-active", granularityButton === buttonElement);
+      }
+      refreshGanttPanel(currentSelectedProjectId);
     }
 
     // 【前提】columnKey は "startDate" | "endDate" | "status"。buttonElement はクリックされたボタン。
@@ -1994,6 +2156,9 @@
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
+        granularityButton.addEventListener("click", () => handleGranularityButtonClick(granularityButton.dataset.granularity, granularityButton));
+      }
       document.getElementById("toggleColumnStartDateButton").addEventListener("click", (event) => handleToggleColumnClick("startDate", event.currentTarget));
       document.getElementById("toggleColumnEndDateButton").addEventListener("click", (event) => handleToggleColumnClick("endDate", event.currentTarget));
       document.getElementById("toggleColumnStatusButton").addEventListener("click", (event) => handleToggleColumnClick("status", event.currentTarget));
