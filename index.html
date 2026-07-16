@@ -1171,12 +1171,22 @@
     .task-popup {
       position: fixed;
       z-index: 150;
-      width: 220px;
+      width: 260px;
       background: var(--color-white);
       border-radius: var(--radius-standard);
       box-shadow: var(--shadow-large);
       padding: 12px;
       font-size: 12px;
+    }
+
+    .task-popup-comment-section {
+      margin-top: 8px;
+      border-top: 1px solid var(--color-border);
+      padding-top: 8px;
+    }
+
+    .task-popup-comment-section .modal-comment-list {
+      max-height: 100px;
     }
 
     .task-popup[hidden] {
@@ -5575,10 +5585,44 @@
     //   （未着手0%／進行中50%／完了100%）から簡易に算出する（要判断事項として明示）。
     const PROGRESS_PERCENT_BY_SCHEDULE_STATUS = { todo: 0, inprogress: 50, done: 100 };
 
-    // 【前提】schedule は表示対象のスケジュールオブジェクト。
-    // 【処理】名前・進捗バー・メモ（読み取り専用）のHTML文字列を組み立てる。
+    // 【前提】comments は対象スケジュールに紐づくコメント全件（無ければ空配列）。
+    // 【処理】投稿日時の昇順に並べ、削除ボタン付きの一覧＋投稿フォームのHTML文字列を組み立てる
+    //   （renderModalCommentSectionToHtmlと同じ考え方。taskPopupは編集モーダルと同時に
+    //   開いている可能性があるため、id・data-actionをモーダル側とは別にして重複を避ける）。
+    // 【結果】ポップアップのコメント欄に入れられるHTML文字列を返す。
+    function renderTaskPopupCommentSectionToHtml(comments) {
+      const sortedComments = comments.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const commentListHtml = sortedComments.length > 0
+        ? sortedComments
+            .map(
+              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+                <div class="panel-list-item-main">
+                  <div>${escapeHtmlText(comment.text)}</div>
+                  <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
+                </div>
+                <div class="panel-list-item-actions">
+                  <button type="button" class="wbs-icon-button" data-action="delete-task-popup-comment" title="削除">🗑</button>
+                </div>
+              </div>`
+            )
+            .join("")
+        : '<p class="empty-state-message">コメントはまだありません。</p>';
+      return `
+        <div class="task-popup-comment-section">
+          <div class="modal-comment-list">${commentListHtml}</div>
+          <div class="modal-comment-post-form">
+            <input type="text" id="taskPopupCommentTextInput" placeholder="コメントを入力">
+            <button type="button" class="panel-add-button" id="taskPopupPostCommentButton">投稿</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // 【前提】schedule は表示対象のスケジュールオブジェクト。comments はそのスケジュールに
+    //   紐づくコメント全件。
+    // 【処理】名前・進捗バー・メモ（読み取り専用）＋埋め込みコメント欄のHTML文字列を組み立てる。
     // 【結果】#taskPopupのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderTaskPopupToHtml(schedule) {
+    function renderTaskPopupToHtml(schedule, comments) {
       const progressPercent = PROGRESS_PERCENT_BY_SCHEDULE_STATUS[schedule.taskStatus] ?? 0;
       const notesText = schedule.notes ? escapeHtmlText(schedule.notes) : "（メモはありません）";
       return `
@@ -5589,6 +5633,7 @@
         <div class="task-popup-progress-track"><div class="task-popup-progress-fill" style="width:${progressPercent}%"></div></div>
         <div class="task-popup-progress-label">進捗：${progressPercent}%</div>
         <div class="task-popup-notes">${notesText}</div>
+        ${renderTaskPopupCommentSectionToHtml(comments)}
       `;
     }
 
@@ -5603,18 +5648,55 @@
 
     // 【前提】scheduleId はポップアップ表示対象のスケジュールid。clientX/clientY はクリック位置
     //   （position:fixedでそのまま使えるビューポート座標）。
-    // 【処理】対象スケジュールの内容でポップアップを組み立てて表示位置を設定し、
-    //   閉じるボタンにイベントを登録する。
+    // 【処理】対象スケジュールの内容・コメントでポップアップを組み立てて表示位置を設定する。
+    //   投稿・削除ボタンはinnerHTML再構築を経ても動くよう、#taskPopup自体へのイベント委譲で
+    //   拾う（initializeApp側で1回だけ登録）。
     // 【結果】ポップアップがクリック位置の近くに表示される。
-    function openTaskPopup(scheduleId, clientX, clientY) {
+    async function openTaskPopup(scheduleId, clientX, clientY) {
       const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
       if (!scheduleRow) return;
+      const comments = await getCommentsByTask(scheduleId);
       const popupElement = document.getElementById("taskPopup");
-      popupElement.innerHTML = renderTaskPopupToHtml(scheduleRow.schedule);
+      popupElement.innerHTML = renderTaskPopupToHtml(scheduleRow.schedule, comments);
       popupElement.style.left = `${clientX}px`;
       popupElement.style.top = `${clientY}px`;
+      popupElement.dataset.scheduleId = scheduleId;
       popupElement.hidden = false;
-      document.getElementById("taskPopupCloseButton").addEventListener("click", closeTaskPopup);
+    }
+
+    // 【前提】#taskPopupが表示中で、dataset.scheduleIdに対象スケジュールidが入っていること。
+    // 【処理】現在のコメント欄のテキストが空でなければaddCommentで保存し、コメント欄だけを
+    //   最新の内容で再構築する（ポップアップ全体は再構築しない＝進捗・メモ欄はそのまま）。
+    // 【結果】投稿後、コメント一覧が更新される。
+    async function handlePostTaskPopupCommentButtonClick() {
+      const popupElement = document.getElementById("taskPopup");
+      const scheduleId = popupElement.dataset.scheduleId;
+      const textInput = document.getElementById("taskPopupCommentTextInput");
+      if (!scheduleId || !textInput) return;
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addComment({ id: generateId(), taskId: scheduleId, text, createdAt: new Date().toISOString() });
+      await refreshTaskPopupCommentSection(scheduleId);
+    }
+
+    // 【前提】commentId は削除したいコメントのid。#taskPopupのdataset.scheduleIdが設定済み。
+    // 【処理】即時メモの個別削除と同じ方針（確認なし即削除）でdeleteCommentし、
+    //   コメント欄だけを再構築する。
+    // 【結果】削除後、コメント一覧が更新される。
+    async function handleDeleteTaskPopupCommentButtonClick(commentId) {
+      const popupElement = document.getElementById("taskPopup");
+      const scheduleId = popupElement.dataset.scheduleId;
+      await deleteComment(commentId);
+      await refreshTaskPopupCommentSection(scheduleId);
+    }
+
+    // 【前提】scheduleId は表示中のポップアップが対象にしているスケジュールid。
+    // 【処理】最新のコメント一覧を取得し、#taskPopup内のコメント欄部分だけを差し替える。
+    // 【結果】コメント一覧の表示が最新の状態になる（進捗・メモ欄は再構築されない）。
+    async function refreshTaskPopupCommentSection(scheduleId) {
+      const comments = await getCommentsByTask(scheduleId);
+      const sectionElement = document.querySelector("#taskPopup .task-popup-comment-section");
+      if (sectionElement) sectionElement.outerHTML = renderTaskPopupCommentSectionToHtml(comments);
     }
 
     // 【前提】scheduleId は削除したいスケジュールのid。
@@ -6247,6 +6329,23 @@
         if (popupElement.contains(event.target)) return;
         if (event.target.closest(".gantt-bar")) return;
         closeTaskPopup();
+      });
+      // ポップアップ内の閉じる・投稿・削除ボタン（コメント欄はinnerHTML再構築を経るため、
+      // #taskPopup自体に1回だけイベント委譲で登録する）。
+      document.getElementById("taskPopup").addEventListener("click", (event) => {
+        if (event.target.id === "taskPopupCloseButton") {
+          closeTaskPopup();
+          return;
+        }
+        if (event.target.id === "taskPopupPostCommentButton") {
+          handlePostTaskPopupCommentButtonClick();
+          return;
+        }
+        const deleteButton = event.target.closest('[data-action="delete-task-popup-comment"]');
+        if (deleteButton) {
+          const item = deleteButton.closest("[data-comment-id]");
+          if (item) handleDeleteTaskPopupCommentButtonClick(item.dataset.commentId);
+        }
       });
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
