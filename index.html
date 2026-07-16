@@ -61,12 +61,26 @@
       box-sizing: border-box;
     }
 
+    /* 対応表No.41：WBSパネルとガント本体を独立してスクロールさせるため、bodyを縦方向の
+       flexコンテナにし、<main>に残りの高さをすべて割り当てる（#lockBandの表示/非表示で
+       ヘッダー群の高さが変わっても、計算式に書き起こさず自動的に追従させるため）。
+       固定配置（position:fixed）のモーダル・トースト・スライドパネル等はbodyの表示方式に
+       影響されないため、このレイアウト変更の影響を受けない。 */
     body {
       margin: 0;
       background: var(--color-bg-page);
       color: var(--color-text-dark);
       font-family: 'DM Sans', -apple-system, "Segoe UI", "Hiragino Sans", sans-serif;
       font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    main {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
     }
 
     button {
@@ -204,6 +218,7 @@
     .main-workspace {
       display: flex;
       align-items: flex-start;
+      height: 100%;
     }
 
     .wbs-panel {
@@ -211,9 +226,17 @@
       flex: 0 0 var(--wbs-panel-width);
       background: var(--color-white);
       border-right: 1px solid var(--color-border);
+      height: 100%;
+      overflow-y: auto;
     }
 
+    /* 対応表No.41：見出し行を.wbs-panel（スクロールコンテナ）の上端に固定する。
+       position:stickyはスクロール中もtop:0の位置に留まり続け、行本体だけが下を
+       通り抜けるようにスクロールする（お手本のwbsBody相当：見出し固定・本体スクロール）。 */
     .wbs-header-row {
+      position: sticky;
+      top: 0;
+      z-index: 5;
       height: var(--timeline-header-height);
       display: flex;
       align-items: flex-end;
@@ -347,12 +370,20 @@
     .gantt-scroll-area {
       flex: 1;
       overflow-x: auto;
+      overflow-y: auto;
+      height: 100%;
       background: var(--color-white);
     }
 
+    /* 対応表No.41：見出し行（月・日の目盛り）は縦スクロールに追従させず.gantt-scroll-area
+       （スクロールコンテナ）の上端に固定する。横スクロールは.gantt-scroll-area自体が
+       ヘッダー・本体をまとめて動かすため、この見出しはposition:stickyでも横方向には
+       ついていく（stickyは指定した軸だけ固定し、他の軸はコンテナと一緒に動く）。 */
     .gantt-timeline-header {
       height: var(--timeline-header-height);
-      position: relative;
+      position: sticky;
+      top: 0;
+      z-index: 5;
       border-bottom: 1px solid var(--color-border);
       background: var(--color-surface-2);
     }
@@ -395,6 +426,13 @@
 
     .gantt-body {
       position: relative;
+      cursor: grab;
+    }
+
+    /* UI差分表No.42：背景ドラッグ中のカーソル（地図アプリの「掴んでいる」表現）。 */
+    .gantt-scroll-area.is-background-dragging,
+    .gantt-scroll-area.is-background-dragging .gantt-body {
+      cursor: grabbing;
     }
 
     .gantt-row-background {
@@ -1157,8 +1195,8 @@
         <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
       </div>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
-      <!-- 初期表示は「全て閉じる」（基本設計書2.2：押すたびにラベルが入れ替わるだけの
-           単純なボタン状態フラグ。個々の行の実際の開閉状態は見ない）。 -->
+      <!-- 初期表示は仮の文言。実際のラベルはrerenderWbsAndGanttFromCacheが、親行の実際の
+           開閉状態（areAllParentRowsCollapsed）を毎回判定して都度上書きする（対応表No.39）。 -->
       <button id="toggleAllScheduleRowsButton" class="toolbar-button" type="button">全て閉じる</button>
       <!-- 列トグル（開始/終了/状態）も同様に1つの塊としてまとめる。 -->
       <div class="button-group">
@@ -2758,12 +2796,6 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
-    // 【設計判断】「全て開く／全て閉じる」ボタンの表示文言・次の動作を決めるための、
-    //   ボタン自身が持つ状態フラグ（基本設計書2.2節：「個々の行の実際の開閉状態は判定材料に
-    //   せず、ボタン自体が持つ状態フラグをそのまま反転させるだけの単純な実装」）。
-    //   trueなら現在のラベルは「全て閉じる」（押すと閉じる動作）、falseなら「全て開く」。
-    //   個々の行の開閉状態（collapsedScheduleIds）とは意図的に無関係に管理する。
-    let isToggleAllButtonShowingCloseLabel = true;
     // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
     // DB非保存の画面上だけの一時状態にする。
     const collapsedMindmapIssueIds = new Set();
@@ -2894,6 +2926,18 @@
         }
       }
       return visibleRows;
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。collapsedScheduleIds は
+    //   折りたたまれているスケジュールidの集合（Set）。
+    // 【処理】子を持つ行（親行）だけを抽出し、1件以上存在し、かつ全件がcollapsedScheduleIdsに
+    //   含まれているかを判定する（対応表No.39のお手本ロジック：
+    //   `parents.length>0&&parents.every(t=>S.collapsed.has(t.id))`と同じ判定）。
+    //   親行が1件も無い場合はfalseを返す（＝「全て開く」表示にする）。
+    // 【結果】親行がすべて折りたたまれていればtrue、そうでなければfalseを返す。
+    function areAllParentRowsCollapsed(scheduleTreeRows, collapsedScheduleIds) {
+      const parentRows = scheduleTreeRows.filter((row) => row.hasChildren);
+      return parentRows.length > 0 && parentRows.every((row) => collapsedScheduleIds.has(row.schedule.id));
     }
 
     // 【前提】taskList は同一プロジェクト内のタスク全件。
@@ -3806,7 +3850,12 @@
     //   列表示・表示粒度の状態だけを使って、WBSパネル・ガント本体の両方を再描画する。
     //   行の折りたたみ切替のように「DBの中身は変わっていないが見た目の状態だけ変わった」
     //   場面で使う（DB再取得を伴うrefreshGanttPanelと役割を分ける）。
-    // 【結果】WBS・ガント両パネルの表示が、現在のキャッシュ・状態を反映したものに更新される。
+    //   「全て開く／全て閉じる」ボタンのラベルも、毎回areAllParentRowsCollapsedで判定し直して
+    //   更新する（対応表No.39：クリック時だけでなく画面描画のたびに実際の状態を見るお手本の
+    //   方式に合わせる。個別行を手動開閉した場合でもラベルと実際の状態が食い違わないようにする
+    //   ため）。
+    // 【結果】WBS・ガント両パネルの表示と、全て開く/閉じるボタンのラベルが、現在のキャッシュ・
+    //   状態を反映したものに更新される。
     function rerenderWbsAndGanttFromCache() {
       const visibleScheduleTreeRows = filterVisibleScheduleTreeRows(currentScheduleTreeRows, collapsedScheduleIds);
       const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
@@ -3824,6 +3873,12 @@
           todayDateString
         )
       );
+      document.getElementById("toggleAllScheduleRowsButton").textContent = areAllParentRowsCollapsed(
+        currentScheduleTreeRows,
+        collapsedScheduleIds
+      )
+        ? "全て開く"
+        : "全て閉じる";
     }
 
     // 【前提】projectId はnull、または実在するプロジェクトのid。currentProjectObjectが
@@ -5673,22 +5728,21 @@
       showToast("削除しました");
     }
 
-    // 【前提】isToggleAllButtonShowingCloseLabelが現在の表示ラベルを表す（true＝「全て閉じる」）。
-    // 【処理】現在のラベルに応じて、子を持つ全スケジュールをcollapsedScheduleIdsへ追加する（閉じる）
-    //   か、collapsedScheduleIds自体を空にする（開く）かのどちらかを行い、フラグを反転させて
-    //   ボタンのラベルを入れ替える。個々の行が現在開いているか閉じているかは判定材料にしない
-    //   （基本設計書2.2節：ボタン自身の状態フラグをそのまま反転させるだけの単純な実装）。
-    // 【結果】WBS・ガント両パネルが再描画され、ボタンのラベルが入れ替わる。
+    // 【前提】currentScheduleTreeRows・collapsedScheduleIdsが設定済みであること。
+    // 【処理】areAllParentRowsCollapsedで「親行が現在すべて折りたたまれているか」を判定し、
+    //   trueならcollapsedScheduleIdsを空にする（全展開）、falseなら子を持つ全スケジュールを
+    //   collapsedScheduleIdsへ追加する（全折りたたみ）。対応表No.39のお手本と同じ判定方式
+    //   （個々の行の実際の開閉状態を毎回チェックする。ボタン自身の状態フラグは持たない）。
+    //   ラベルの更新はrerenderWbsAndGanttFromCache側が毎回行うため、ここでは行わない。
+    // 【結果】WBS・ガント両パネルが再描画され、ボタンのラベルも最新の状態に更新される。
     function handleToggleAllScheduleRowsButtonClick() {
-      if (isToggleAllButtonShowingCloseLabel) {
+      if (areAllParentRowsCollapsed(currentScheduleTreeRows, collapsedScheduleIds)) {
+        collapsedScheduleIds.clear();
+      } else {
         for (const row of currentScheduleTreeRows) {
           if (row.hasChildren) collapsedScheduleIds.add(row.schedule.id);
         }
-      } else {
-        collapsedScheduleIds.clear();
       }
-      isToggleAllButtonShowingCloseLabel = !isToggleAllButtonShowingCloseLabel;
-      document.getElementById("toggleAllScheduleRowsButton").textContent = isToggleAllButtonShowingCloseLabel ? "全て閉じる" : "全て開く";
       rerenderWbsAndGanttFromCache();
     }
 
@@ -6173,6 +6227,98 @@
       document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * pixelsPerDay - 100, 0);
     }
 
+    // ===== WBSパネルとガント本体の縦スクロール同期（対応表No.41） =====
+    // 【設計判断】#wbsPanelと.gantt-scroll-areaは、それぞれ独立したoverflow-y:autoの
+    //   スクロールコンテナ（CSS側でheight:100%＋overflow-y:autoを付与済み）。片方をscrollTopで
+    //   追従させると、その操作自体がscrollイベントを発火させ、もう片方が今度は最初の要素を
+    //   追従させようとして…と無限に呼び合う恐れがある。isSyncingVerticalScrollという
+    //   同期中フラグを1つ持ち、「自分がスクロールを起こした側の処理中である間は、相手からの
+    //   scrollイベントを無視する」ことでこの無限ループを防ぐ。
+    let isSyncingVerticalScroll = false;
+
+    // 【前提】WBSパネルのscrollイベントから呼ばれる。
+    // 【処理】isSyncingVerticalScrollが立っていれば何もしない（ガント側の同期処理が今まさに
+    //   WBSパネルのscrollTopを書き換えたことで発火したscrollイベントのため、ここで反応すると
+    //   無限ループになる）。そうでなければフラグを立てて、ガント側のscrollTopをWBS側に
+    //   合わせ、フラグを下ろす。
+    // 【結果】ガント本体がWBSパネルと同じ縦位置までスクロールされる。
+    function handleWbsPanelVerticalScroll() {
+      if (isSyncingVerticalScroll) return;
+      isSyncingVerticalScroll = true;
+      document.querySelector(".gantt-scroll-area").scrollTop = document.getElementById("wbsPanel").scrollTop;
+      isSyncingVerticalScroll = false;
+    }
+
+    // 【前提】ガント本体（.gantt-scroll-area）のscrollイベントから呼ばれる。
+    // 【処理】handleWbsPanelVerticalScrollと対になる処理。isSyncingVerticalScrollが立っていれば
+    //   何もしない（WBS側の同期処理由来のscrollイベントのため）。そうでなければフラグを立てて
+    //   WBSパネルのscrollTopをガント側に合わせ、フラグを下ろす。
+    // 【結果】WBSパネルがガント本体と同じ縦位置までスクロールされる。
+    function handleGanttScrollAreaVerticalScroll() {
+      if (isSyncingVerticalScroll) return;
+      isSyncingVerticalScroll = true;
+      document.getElementById("wbsPanel").scrollTop = document.querySelector(".gantt-scroll-area").scrollTop;
+      isSyncingVerticalScroll = false;
+    }
+
+    // ===== ガント背景ドラッグによる自動スクロール（対応表No.42） =====
+    // 【設計判断】ganttPanelBodyへのpointerdownは、既存のバードラッグ処理
+    //   （handleBarPointerDown呼び出し側）が「.gantt-bar要素が見つかった場合のみ」処理する
+    //   分岐になっている。背景ドラッグはその逆＝「.gantt-bar要素が見つからなかった場合」に
+    //   だけ開始するため、既存のバー操作とは完全に排他で干渉しない（同じイベントの中で
+    //   if/elseのどちらか一方だけが実行される）。
+    //   ドラッグ中の状態はisBackgroundDraggingという専用フラグで管理し、バードラッグの
+    //   draggedBarScheduleIdとは別の変数のため、document側のpointermove/pointerupリスナーも
+    //   互いのフラグを見て自分の担当外なら何もしないだけで、取り合いにならない。
+    //   スクロール位置の直接書き換えは.gantt-scroll-areaのscrollイベントを発火させるため、
+    //   対応表No.41で実装したhandleGanttScrollAreaVerticalScrollが自動的にWBSパネルを
+    //   追従させる（背景ドラッグ用に別の同期処理は不要）。
+
+    // ドラッグ中かどうか。ドラッグ開始時点のポインタ座標・スクロール位置も保持する。
+    let isBackgroundDragging = false;
+    let backgroundDragStartClientX = 0;
+    let backgroundDragStartClientY = 0;
+    let backgroundDragStartScrollLeft = 0;
+    let backgroundDragStartScrollTop = 0;
+
+    // 【前提】event はganttPanelBody上でのpointerdownイベントのうち、.gantt-bar要素にも
+    //   .gantt-bar-handleにも当たらなかった場合（＝何もない背景／グリッド部分）にのみ呼ばれる。
+    // 【処理】ドラッグ開始時点のポインタ座標と、.gantt-scroll-areaの現在のスクロール位置を
+    //   記録する。カーソルを「掴んでいる」見た目にするクラスを付ける。
+    // 【結果】背景ドラッグの状態が開始される（実際のスクロールはpointermoveハンドラが行う）。
+    function handleGanttBackgroundPointerDown(event) {
+      isBackgroundDragging = true;
+      backgroundDragStartClientX = event.clientX;
+      backgroundDragStartClientY = event.clientY;
+      const scrollAreaElement = document.querySelector(".gantt-scroll-area");
+      backgroundDragStartScrollLeft = scrollAreaElement.scrollLeft;
+      backgroundDragStartScrollTop = scrollAreaElement.scrollTop;
+      scrollAreaElement.classList.add("is-background-dragging");
+    }
+
+    // 【前提】isBackgroundDraggingが設定済み（ドラッグ中）であること。
+    // 【処理】ポインタの移動量を計算し、地図アプリと同じ向き（ポインタを右へ動かす＝
+    //   コンテンツを右へ引く＝スクロール位置は左へ動く）でscrollLeft/scrollTopを
+    //   「開始時のスクロール位置－移動量」に設定する。
+    // 【結果】ガント本体（および対応表No.41の同期によりWBSパネルも）がポインタに追従してスクロールする。
+    function handleGanttBackgroundPointerMove(event) {
+      if (!isBackgroundDragging) return;
+      const deltaX = event.clientX - backgroundDragStartClientX;
+      const deltaY = event.clientY - backgroundDragStartClientY;
+      const scrollAreaElement = document.querySelector(".gantt-scroll-area");
+      scrollAreaElement.scrollLeft = backgroundDragStartScrollLeft - deltaX;
+      scrollAreaElement.scrollTop = backgroundDragStartScrollTop - deltaY;
+    }
+
+    // 【前提】なし。
+    // 【処理】ドラッグ状態を終了し、カーソルの見た目を元に戻す。
+    // 【結果】背景ドラッグが終了する。
+    function handleGanttBackgroundPointerUp() {
+      if (!isBackgroundDragging) return;
+      isBackgroundDragging = false;
+      document.querySelector(".gantt-scroll-area").classList.remove("is-background-dragging");
+    }
+
     // 【前提】granularity は "day" | "week" | "month" | "quarter"。buttonElement はクリックされたボタン。
     // 【処理】表示粒度を切り替え、ボタンの選択状態を更新した上でガントパネルを再描画する
     //   （DBへの再問い合わせは不要。currentProjectObjectの日付情報だけで再計算できるため）。
@@ -6253,13 +6399,20 @@
       // （マインドマップと同じ理由でpointermove/pointerupはdocument側で拾う）。
       document.getElementById("ganttPanelBody").addEventListener("pointerdown", (event) => {
         const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
-        if (!barElement) return;
+        if (!barElement) {
+          // UI差分表No.42：バー・掴み手のどちらにも当たらなかった場合だけ背景ドラッグを開始する
+          // （既存のバー操作とは完全に排他）。
+          handleGanttBackgroundPointerDown(event);
+          return;
+        }
         const handleElement = event.target.closest(".gantt-bar-handle");
         const mode = handleElement ? handleElement.dataset.dragMode : "move";
         handleBarPointerDown(event, barElement.dataset.scheduleId, mode, barElement);
       });
       document.addEventListener("pointermove", handleBarPointerMove);
       document.addEventListener("pointerup", handleBarPointerUp);
+      document.addEventListener("pointermove", handleGanttBackgroundPointerMove);
+      document.addEventListener("pointerup", handleGanttBackgroundPointerUp);
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
@@ -6330,6 +6483,8 @@
       });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      document.getElementById("wbsPanel").addEventListener("scroll", handleWbsPanelVerticalScroll);
+      document.querySelector(".gantt-scroll-area").addEventListener("scroll", handleGanttScrollAreaVerticalScroll);
       document.getElementById("toggleAllScheduleRowsButton").addEventListener("click", handleToggleAllScheduleRowsButtonClick);
       for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
         granularityButton.addEventListener("click", () => handleGranularityButtonClick(granularityButton.dataset.granularity, granularityButton));
