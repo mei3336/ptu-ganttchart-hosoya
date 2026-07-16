@@ -839,6 +839,15 @@
       border-bottom: 1px solid var(--color-border);
     }
 
+    /* P3：即時メモパネルのように、見出しの隣に操作ボタンを1つ添えたい場合の下位ラッパー。
+       .slide-panel-header自体はjustify-content:space-betweenで「見出し側／×ボタン側」の
+       2箇所しか想定していないため、ここに複数要素をまとめて1つの子要素として渡す。 */
+    .slide-panel-header-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
     .slide-panel-header h2 {
       margin: 0;
       font-size: 15px;
@@ -1141,10 +1150,14 @@
     </div>
   </aside>
 
-  <!-- P3：即時メモ。個別削除は確認なし即削除（既知の仕様）。 -->
+  <!-- P3：即時メモ。個別削除は確認なし即削除（既知の仕様）。全削除は確認ダイアログを挟む
+       （基本設計書10章・詳細設計書3.8.2）。 -->
   <aside id="quickMemoSlidePanel" class="slide-panel">
     <div class="slide-panel-header">
-      <h2>即時メモ</h2>
+      <div class="slide-panel-header-title-group">
+        <h2>即時メモ</h2>
+        <button type="button" class="toolbar-button" id="clearQuickMemosButton">全削除</button>
+      </div>
       <button type="button" id="closeQuickMemoPanelButton" class="slide-panel-close-button">×</button>
     </div>
     <div class="slide-panel-body">
@@ -3918,6 +3931,28 @@
       await refreshQuickMemoPanel(currentSelectedProjectId);
     }
 
+    // 【前提】currentSelectedProjectIdが設定済みであること。
+    // 【処理】0件なら案内のみ表示して終了する。1件以上あれば件数を明示した確認ダイアログの上で
+    //   clearQuickMemosByProjectする（詳細設計書3.8.2 clearQuickMemos相当。DB側の関数
+    //   clearQuickMemosByProjectは既に実装済みだったが、呼び出すUIボタンが無かったため追加する）。
+    // 【結果】確認OK時、このプロジェクトの即時メモがすべて削除され、パネルが再描画される。
+    //   トースト「即時メモを削除しました」を表示する。0件の場合はトースト「メモがありません」。
+    async function handleClearQuickMemosButtonClick() {
+      if (!currentSelectedProjectId) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      const quickMemoList = await getQuickMemosByProject(currentSelectedProjectId);
+      if (quickMemoList.length === 0) {
+        showToast("メモがありません");
+        return;
+      }
+      if (!window.confirm(`${quickMemoList.length}件のメモを全て削除しますか？`)) return;
+      await clearQuickMemosByProject(currentSelectedProjectId);
+      await refreshQuickMemoPanel(currentSelectedProjectId);
+      showToast("即時メモを削除しました");
+    }
+
     // ===== P4：メモパネル =====
     // 【設計判断】自動保存はデバウンス方式ではなく、入力欄からフォーカスが外れた時点
     //   （blur）で保存する簡略版にする。デバウンスタイマーの管理はコードの複雑さの割に
@@ -5737,6 +5772,7 @@
 
       // P3：即時メモの投稿（クリック・Ctrl+Enter）・削除（イベント委譲）。
       document.getElementById("postQuickMemoButton").addEventListener("click", handlePostQuickMemoButtonClick);
+      document.getElementById("clearQuickMemosButton").addEventListener("click", handleClearQuickMemosButtonClick);
       document.getElementById("quickMemoTextInput").addEventListener("keydown", (event) => {
         if (event.key === "Enter" && event.ctrlKey) handlePostQuickMemoButtonClick();
       });
