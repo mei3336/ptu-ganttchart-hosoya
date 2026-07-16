@@ -4402,14 +4402,16 @@
 
     // 【前提】project はnull（新規作成モード）、または既存プロジェクトオブジェクト（編集モード）。
     // 【処理】M1/M2共通のプロジェクトモーダルのHTML文字列を組み立てる（DOMには触れない）。
-    //   新規作成時は開始日・終了日の既定値を今日にする（モーダル・ダイアログ一覧M1）。
+    //   新規作成時は開始日・終了日の既定値を今日,1年後にする（モーダル・ダイアログ一覧M1）。
     // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
     function renderProjectModalToHtml(project) {
       const isEditMode = Boolean(project);
       const todayDateString = new Date().toISOString().slice(0, 10);
+      const oneYearLaterDate = new Date();
+            oneYearLaterDate.setFullYear(oneYearLaterDate.getFullYear() + 1);
       const nameValue = isEditMode ? project.name : "";
       const startDateValue = isEditMode ? project.startDate : todayDateString;
-      const endDateValue = isEditMode ? project.endDate : todayDateString;
+      const endDateValue = isEditMode ? project.endDate : oneYearLaterDate;
       return `
         <h2>${isEditMode ? "プロジェクト編集" : "新規プロジェクト作成"}</h2>
         <div class="modal-field">
