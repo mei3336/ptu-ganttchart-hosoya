@@ -443,10 +443,39 @@
       white-space: nowrap;
       overflow: hidden;
       box-shadow: var(--shadow-small);
+      cursor: grab;
+      touch-action: none;
     }
 
     .gantt-bar.is-parent-bar {
       border-radius: 8px;
+    }
+
+    /* 詳細設計書3.2.4：掴み手は常時表示ではなく、バーにマウスを乗せた時のみうっすら色が付く。
+       葉ノード（子を持たない行）にしか付与されない（renderGanttBodyToHtml側の分岐）。 */
+    .gantt-bar-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: ew-resize;
+    }
+
+    .bar-lh {
+      left: 0;
+    }
+
+    .bar-rh {
+      right: 0;
+    }
+
+    .gantt-bar:hover .gantt-bar-handle {
+      background: rgba(0, 0, 0, .18);
+    }
+
+    .gantt-bar.is-bar-dragging {
+      opacity: .85;
+      box-shadow: var(--shadow-medium);
     }
 
     .gantt-bar.is-done-status {
@@ -3111,6 +3140,58 @@
       return { leftPx: dayOffsetStart * pixelsPerDay, widthPx: durationDays * pixelsPerDay, durationDays };
     }
 
+    // 【前提】dateString は"YYYY-MM-DD"形式。days は加算したい日数（負値可）。
+    // 【処理】UTC基準のタイムスタンプへ変換して日数を加算し、"YYYY-MM-DD"形式へ戻す。
+    // 【結果】計算後の日付文字列を返す。
+    function shiftDateStringByDays(dateString, days) {
+      const shiftedTimestamp = parseDateStringToUtcTimestamp(dateString) + days * MILLISECONDS_PER_DAY;
+      return new Date(shiftedTimestamp).toISOString().slice(0, 10);
+    }
+
+    // 【前提】mode は"move"|"resize-start"|"resize"。originalStartDate/originalEndDateは
+    //   ドラッグ開始時点の日付。deltaDaysはポインタ移動量から換算した日数（負値可）。
+    //   projectStartDate/projectEndDateはクランプ範囲（プロジェクトの期間）。
+    // 【処理】詳細設計書3.2.4「境界値の丸め処理（実機確認済み・アラート無し）」をそのまま
+    //   実装する：
+    //   ・move：開始日・終了日を同じ日数だけ平行移動（期間不変）。新開始日がプロジェクト開始日
+    //     より前になる場合は、期間を保ったままプロジェクト開始日にスナップ。新終了日が
+    //     プロジェクト終了日を超える場合はプロジェクト終了日でカット（2つの判定は独立で、
+    //     どちらも通知は出さず黙ってクランプする）。
+    //   ・resize-start：開始日のみ移動。新開始日が終了日を超える場合は終了日と同日にクランプ。
+    //     プロジェクト開始日より前にはできない。
+    //   ・resize：終了日のみ移動。新終了日が開始日を下回る場合は開始日と同日にクランプ。
+    //     プロジェクト終了日を超えることはできない。
+    // 【結果】クランプ済みの{startDate, endDate}を返す。
+    function calculateDraggedBarDates(mode, originalStartDate, originalEndDate, deltaDays, projectStartDate, projectEndDate) {
+      if (mode === "move") {
+        let newStartDate = shiftDateStringByDays(originalStartDate, deltaDays);
+        let newEndDate = shiftDateStringByDays(originalEndDate, deltaDays);
+        if (newStartDate < projectStartDate) {
+          const durationDays = Math.round(
+            (parseDateStringToUtcTimestamp(originalEndDate) - parseDateStringToUtcTimestamp(originalStartDate)) / MILLISECONDS_PER_DAY
+          );
+          newStartDate = projectStartDate;
+          newEndDate = shiftDateStringByDays(newStartDate, durationDays);
+        }
+        if (newEndDate > projectEndDate) {
+          newEndDate = projectEndDate;
+        }
+        return { startDate: newStartDate, endDate: newEndDate };
+      }
+
+      if (mode === "resize-start") {
+        let newStartDate = shiftDateStringByDays(originalStartDate, deltaDays);
+        if (newStartDate > originalEndDate) newStartDate = originalEndDate;
+        if (newStartDate < projectStartDate) newStartDate = projectStartDate;
+        return { startDate: newStartDate, endDate: originalEndDate };
+      }
+
+      let newEndDate = shiftDateStringByDays(originalEndDate, deltaDays);
+      if (newEndDate < originalStartDate) newEndDate = originalStartDate;
+      if (newEndDate > projectEndDate) newEndDate = projectEndDate;
+      return { startDate: originalStartDate, endDate: newEndDate };
+    }
+
     // 【前提】milestones は project.milestones（{name, date}の配列）。
     // 【処理】名前・日付の両方を持つマイルストーンについて、タイムライン上のx座標（px）を
     //   計算する（詳細設計書3.11.1エラーバリエーション：名前が空の行は保存自体は成功するが
@@ -3489,7 +3570,13 @@
           const showLabel = hasChildren || geometry.widthPx > 60;
           const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${geometry.durationDays}日)` : "";
           const backgroundColor = schedule.color || "#2563EB";
-          return `<div class="gantt-bar${parentClass}${doneClass}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}</div>`;
+          // 【設計判断】掴み手（bar-lh/bar-rh）は子を持たない行（葉ノード）にしか付与しない
+          // （詳細設計書3.2.4：親行は移動のみ可能でリサイズ不可。親の日付は子から自動算出される
+          // ため、意図的にリサイズ不可としている）。
+          const resizeHandlesHtml = hasChildren
+            ? ""
+            : `<div class="gantt-bar-handle bar-lh" data-drag-mode="resize-start"></div><div class="gantt-bar-handle bar-rh" data-drag-mode="resize"></div>`;
+          return `<div class="gantt-bar${parentClass}${doneClass}" data-schedule-id="${escapeHtmlText(schedule.id)}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}${resizeHandlesHtml}</div>`;
         })
         .join("");
 
@@ -5125,6 +5212,169 @@
       await refreshGanttPanel(currentSelectedProjectId);
     }
 
+    // ===== ガントバーのドラッグによる日程変更（詳細設計書3.2.4） =====
+    // 【設計判断】マインドマップノードのドラッグ（pointerdown/pointermove/pointerup、
+    //   handleMindmapNodePointerDown等）と同じ実装パターンを使う。ドラッグ中は見た目
+    //   （left/width）だけを更新し、DBへの保存はpointerup時の1回だけ行う。
+    //   3モード（詳細設計書3.2.4）：
+    //   ・move：バー本体をつかんだ場合。開始日・終了日を同じ日数だけ平行移動（期間不変）。
+    //   ・resize-start：左端の掴み手（bar-lh）をつかんだ場合。開始日のみ変更。
+    //   ・resize：右端の掴み手（bar-rh）をつかんだ場合。終了日のみ変更。
+    //   掴み手は葉ノード（子を持たない行）にしか無いため、親行（子を持つ行）は常にmoveのみになる。
+    //   【設計判断：親行をmoveした場合の子孫の扱い】親の日付は子から自動算出される仕様
+    //   （3.2.3・syncAncestorDates）のため、親バーだけを動かしても次に子が変わった瞬間に
+    //   syncAncestorDatesで元へ戻ってしまい操作が意味を持たない。詳細設計書はこの点を明記
+    //   していないが、データの整合性を保つため、親行をmoveした場合は配下の子孫スケジュールも
+    //   同じ日数だけ平行移動する（さらに上の祖先の日付はsyncAncestorDatesで再計算する）。
+
+    // ドラッグ中のスケジュールid・モード。ドラッグしていない時はnull。
+    let draggedBarScheduleId = null;
+    let draggedBarMode = null; // "move" | "resize-start" | "resize"
+    let barDragStartPointerX = 0;
+    let barDragStartStartDate = "";
+    let barDragStartEndDate = "";
+    let barDragPixelsPerDay = 0;
+
+    // 【前提】rootScheduleId は起点スケジュールのid。allSchedules は同一プロジェクト内の
+    //   全スケジュール。
+    // 【処理】parentIdをたどり、rootScheduleIdの子孫（子・孫）を幅優先で収集する
+    //   （deleteScheduleCascadeと同じ考え方。root自身は含めない）。
+    // 【結果】子孫スケジュールオブジェクトの配列を返す（子孫がなければ空配列）。
+    function collectScheduleDescendants(rootScheduleId, allSchedules) {
+      const childSchedulesByParentId = new Map();
+      for (const schedule of allSchedules) {
+        if (schedule.parentId === null || schedule.parentId === undefined) continue;
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
+      const descendants = [];
+      let frontier = childSchedulesByParentId.get(rootScheduleId) || [];
+      while (frontier.length > 0) {
+        descendants.push(...frontier);
+        const nextFrontier = [];
+        for (const node of frontier) {
+          nextFrontier.push(...(childSchedulesByParentId.get(node.id) || []));
+        }
+        frontier = nextFrontier;
+      }
+      return descendants;
+    }
+
+    // 【前提】event はガントバー（.gantt-bar）またはその掴み手（.gantt-bar-handle）上での
+    //   pointerdownイベント。scheduleId はそのバーが表すスケジュールid。mode は
+    //   "move"|"resize-start"|"resize"。barElement は実際にポインタを捕捉する要素（.gantt-bar
+    //   自身。掴み手が対象でも、見た目の更新はバー本体に対して行うため）。
+    // 【処理】ロック中は開始しない（詳細設計書3.1.3：個別関数側でのロックチェック）。
+    //   それ以外は、ドラッグ開始時点のポインタ座標・対象スケジュールの開始日・終了日・
+    //   現在の表示粒度のpixelsPerDayを記録する（以降のpointermoveで差分計算するための基準点）。
+    // 【結果】ドラッグ状態が開始される（実際の見た目更新はpointermoveハンドラが行う）。
+    function handleBarPointerDown(event, scheduleId, mode, barElement) {
+      if (currentProjectObject?.locked) {
+        showToast("ロック中のため編集できません");
+        return;
+      }
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+      draggedBarScheduleId = scheduleId;
+      draggedBarMode = mode;
+      barDragStartPointerX = event.clientX;
+      barDragStartStartDate = scheduleRow.schedule.startDate;
+      barDragStartEndDate = scheduleRow.schedule.endDate;
+      barDragPixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
+      barElement.classList.add("is-bar-dragging");
+      barElement.setPointerCapture(event.pointerId);
+      event.stopPropagation();
+    }
+
+    // 【前提】draggedBarScheduleIdが設定済み（ドラッグ中）であること。
+    // 【処理】ポインタの移動量を「移動日数」に変換し（barDragPixelsPerDayで割って四捨五入）、
+    //   calculateDraggedBarDatesでモードに応じた新しい開始日・終了日（クランプ済み）を求め、
+    //   バーの見た目（left/width）だけを更新する。DBへの保存はしない。
+    // 【結果】バーの見た目がポインタの位置に追従する。
+    function handleBarPointerMove(event) {
+      if (!draggedBarScheduleId) return;
+      const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${draggedBarScheduleId}"]`);
+      if (!barElement) return;
+
+      const deltaDays = Math.round((event.clientX - barDragStartPointerX) / barDragPixelsPerDay);
+      const { startDate, endDate } = calculateDraggedBarDates(
+        draggedBarMode,
+        barDragStartStartDate,
+        barDragStartEndDate,
+        deltaDays,
+        currentProjectObject.startDate,
+        currentProjectObject.endDate
+      );
+      const geometry = calculateBarGeometry({ startDate, endDate }, currentTimelineStartDateString, barDragPixelsPerDay);
+      if (!geometry) return;
+      barElement.style.left = `${geometry.leftPx}px`;
+      barElement.style.width = `${geometry.widthPx}px`;
+    }
+
+    // 【前提】ドラッグ中であること。
+    // 【処理】最終的な開始日・終了日を確定し、ドラッグ開始時点と変わっていなければ
+    //   （＝実質クリックだった場合）何も保存せず見た目だけ元に戻す。変わっていれば
+    //   addScheduleで保存する。対象が親行（子を持つ行）の場合は、実際に確定した開始日の
+    //   移動量ぶん、配下の子孫スケジュールも平行移動して保存する（本セクション冒頭の設計判断）。
+    //   親（parentId）を持つ場合はsyncAncestorDatesで祖先の日付を再計算する（3.2.3）。
+    // 【結果】DBが更新され、ガントパネルが再描画される。実際に日付が変わった場合のみ
+    //   トースト「スケジュールを更新しました」を表示する（詳細設計書3.2.4）。
+    async function handleBarPointerUp(event) {
+      if (!draggedBarScheduleId) return;
+      const scheduleId = draggedBarScheduleId;
+      const mode = draggedBarMode;
+      draggedBarScheduleId = null;
+      draggedBarMode = null;
+
+      const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${scheduleId}"]`);
+      if (barElement) barElement.classList.remove("is-bar-dragging");
+
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+
+      const deltaDays = Math.round((event.clientX - barDragStartPointerX) / barDragPixelsPerDay);
+      const { startDate, endDate } = calculateDraggedBarDates(
+        mode,
+        barDragStartStartDate,
+        barDragStartEndDate,
+        deltaDays,
+        currentProjectObject.startDate,
+        currentProjectObject.endDate
+      );
+
+      if (startDate === barDragStartStartDate && endDate === barDragStartEndDate) {
+        await refreshGanttPanel(currentSelectedProjectId);
+        return;
+      }
+
+      const updatedSchedule = { ...scheduleRow.schedule, startDate, endDate };
+      await addSchedule(updatedSchedule);
+
+      if (scheduleRow.hasChildren && mode === "move") {
+        const actualStartDeltaDays = Math.round(
+          (parseDateStringToUtcTimestamp(startDate) - parseDateStringToUtcTimestamp(barDragStartStartDate)) / MILLISECONDS_PER_DAY
+        );
+        const allSchedules = currentScheduleTreeRows.map((row) => row.schedule);
+        const descendants = collectScheduleDescendants(scheduleId, allSchedules);
+        for (const descendant of descendants) {
+          await addSchedule({
+            ...descendant,
+            startDate: shiftDateStringByDays(descendant.startDate, actualStartDeltaDays),
+            endDate: shiftDateStringByDays(descendant.endDate, actualStartDeltaDays),
+          });
+        }
+      }
+
+      if (updatedSchedule.parentId !== null && updatedSchedule.parentId !== undefined) {
+        await syncAncestorDates(updatedSchedule.parentId);
+      }
+
+      await refreshGanttPanel(currentSelectedProjectId);
+      showToast("スケジュールを更新しました");
+    }
+
     // 【前提】scheduleId は削除したいスケジュールのid。
     // 【処理】子の有無でC2（子なし）／C3（子あり・サブタスクごと削除）の確認文言を切り替えて
     //   confirm()し、OKならdeleteScheduleCascadeで削除する（連鎖削除・コメント削除・
@@ -5715,6 +5965,17 @@
       });
       document.addEventListener("pointermove", handleMindmapNodePointerMove);
       document.addEventListener("pointerup", handleMindmapNodePointerUp);
+      // ガントバーのドラッグによる日程変更。掴んだ場所（掴み手か本体か）でモードを決める
+      // （マインドマップと同じ理由でpointermove/pointerupはdocument側で拾う）。
+      document.getElementById("ganttPanelBody").addEventListener("pointerdown", (event) => {
+        const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
+        if (!barElement) return;
+        const handleElement = event.target.closest(".gantt-bar-handle");
+        const mode = handleElement ? handleElement.dataset.dragMode : "move";
+        handleBarPointerDown(event, barElement.dataset.scheduleId, mode, barElement);
+      });
+      document.addEventListener("pointermove", handleBarPointerMove);
+      document.addEventListener("pointerup", handleBarPointerUp);
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
