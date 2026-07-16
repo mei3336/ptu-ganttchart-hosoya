@@ -474,6 +474,12 @@
       background: rgba(0, 0, 0, .18);
     }
 
+    /* UI差分表No.52：バーホバー時の演出（お手本：filter:brightness(.9);box-shadow強調）。 */
+    .gantt-bar:hover {
+      filter: brightness(.9);
+      box-shadow: var(--shadow-medium);
+    }
+
     .gantt-bar.is-bar-dragging {
       opacity: .85;
       box-shadow: var(--shadow-medium);
@@ -510,6 +516,50 @@
       background: #D97706;
       transform: translateX(-10px) rotate(45deg);
       border-radius: 2px;
+    }
+
+    /* UI差分表No.55：マイルストーンのカスタムツールチップ。ブラウザ標準title属性の代わりに
+       data-tooltip属性＋CSSの::after（content:attr()）で、矢印付きの吹き出しを実装する
+       （JS不要）。既定は非表示（opacity:0;visibility:hidden）にし、
+       .gantt-milestone-marker:hoverでフェードインさせる。 */
+    .gantt-milestone-marker::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: -8px;
+      left: -10px;
+      transform: translate(-50%, -100%);
+      background: #292524;
+      color: var(--color-white);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .gantt-milestone-marker::before {
+      content: "";
+      position: absolute;
+      top: -8px;
+      left: -10px;
+      transform: translate(-50%, -100%) translateY(100%);
+      border: 4px solid transparent;
+      border-top-color: #292524;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .gantt-milestone-marker:hover::after,
+    .gantt-milestone-marker:hover::before {
+      opacity: 1;
+      visibility: visible;
     }
 
     /* ===== カンバン（タスク管理） ===== */
@@ -1114,6 +1164,69 @@
       opacity: 1;
       transform: translateY(0);
     }
+
+    /* UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。
+       position:fixedでevent.clientX/clientYにそのまま配置する（スクロール位置の
+       補正が不要になるため）。 */
+    .task-popup {
+      position: fixed;
+      z-index: 150;
+      width: 260px;
+      background: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      padding: 12px;
+      font-size: 12px;
+    }
+
+    .task-popup-comment-section {
+      margin-top: 8px;
+      border-top: 1px solid var(--color-border);
+      padding-top: 8px;
+    }
+
+    .task-popup-comment-section .modal-comment-list {
+      max-height: 100px;
+    }
+
+    .task-popup[hidden] {
+      display: none;
+    }
+
+    .task-popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .task-popup-progress-track {
+      height: 6px;
+      background: var(--color-surface-3);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+
+    .task-popup-progress-fill {
+      height: 100%;
+      background: var(--color-accent);
+    }
+
+    .task-popup-progress-label {
+      font-size: 11px;
+      color: var(--color-text-light);
+      margin-bottom: 8px;
+    }
+
+    .task-popup-notes {
+      color: var(--color-text-mid);
+      white-space: pre-wrap;
+      max-height: 100px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -1305,6 +1418,10 @@
   <!-- 共通UI部品：トースト通知（UIデザイン仕様書2.4節）。showToast()がtextContentとshowクラスを
        差し替えるだけの単一の入れ物で、全機能から共通で使い回す。 -->
   <div id="toast"></div>
+
+  <!-- UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。openScheduleModalの
+       中央モーダルとは別物で、クリックしたバーの近くに表示する共通の入れ物。 -->
+  <div id="taskPopup" class="task-popup" hidden></div>
 
   <script>
     "use strict";
@@ -3609,7 +3726,7 @@
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
         .map(
           (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
+            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" data-tooltip="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
         )
         .join("");
 
@@ -5311,6 +5428,11 @@
     let barDragStartStartDate = "";
     let barDragStartEndDate = "";
     let barDragPixelsPerDay = 0;
+    // これ未満の移動量は「クリック」とみなす（MINDMAP_DRAG_THRESHOLD_PXと同じ考え方）。
+    // pointerup直後に発火するclickイベントで、実際にドラッグした場合だけタスクポップアップを
+    // 開かせないようにするため、handleBarPointerUpが移動量を判定してこの変数に記録する。
+    const BAR_CLICK_VS_DRAG_THRESHOLD_PX = 3;
+    let wasBarPointerMovedSignificantly = false;
 
     // 【前提】rootScheduleId は起点スケジュールのid。allSchedules は同一プロジェクト内の
     //   全スケジュール。
@@ -5404,6 +5526,8 @@
       const mode = draggedBarMode;
       draggedBarScheduleId = null;
       draggedBarMode = null;
+      wasBarPointerMovedSignificantly =
+        Math.abs(event.clientX - barDragStartPointerX) >= BAR_CLICK_VS_DRAG_THRESHOLD_PX;
 
       const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${scheduleId}"]`);
       if (barElement) barElement.classList.remove("is-bar-dragging");
@@ -5450,6 +5574,129 @@
 
       await refreshGanttPanel(currentSelectedProjectId);
       showToast("スケジュールを更新しました");
+    }
+
+    // ===== ガントバー直接クリックの軽量ポップアップ（UI差分表No.75／対応表No.17） =====
+    // 【設計判断】既存のopenScheduleModal（中央モーダル・フォーム編集）とは別物。クリックした
+    //   バーの近くに表示する読み取り専用の簡易ポップアップで、名前・進捗・メモを確認できる。
+    //   #taskPopupという共通の入れ物1つを使い回す（#toast/#modalOverlayと同じ設計）。
+    //   進捗率の算出根拠：対応表No.17の抜粋にはdur（日数）はあるが%の算出式が現れておらず、
+    //   データモデルにも数値の進捗フィールドが無い。ここではステータス
+    //   （未着手0%／進行中50%／完了100%）から簡易に算出する（要判断事項として明示）。
+    const PROGRESS_PERCENT_BY_SCHEDULE_STATUS = { todo: 0, inprogress: 50, done: 100 };
+
+    // 【前提】comments は対象スケジュールに紐づくコメント全件（無ければ空配列）。
+    // 【処理】投稿日時の昇順に並べ、削除ボタン付きの一覧＋投稿フォームのHTML文字列を組み立てる
+    //   （renderModalCommentSectionToHtmlと同じ考え方。taskPopupは編集モーダルと同時に
+    //   開いている可能性があるため、id・data-actionをモーダル側とは別にして重複を避ける）。
+    // 【結果】ポップアップのコメント欄に入れられるHTML文字列を返す。
+    function renderTaskPopupCommentSectionToHtml(comments) {
+      const sortedComments = comments.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const commentListHtml = sortedComments.length > 0
+        ? sortedComments
+            .map(
+              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+                <div class="panel-list-item-main">
+                  <div>${escapeHtmlText(comment.text)}</div>
+                  <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
+                </div>
+                <div class="panel-list-item-actions">
+                  <button type="button" class="wbs-icon-button" data-action="delete-task-popup-comment" title="削除">🗑</button>
+                </div>
+              </div>`
+            )
+            .join("")
+        : '<p class="empty-state-message">コメントはまだありません。</p>';
+      return `
+        <div class="task-popup-comment-section">
+          <div class="modal-comment-list">${commentListHtml}</div>
+          <div class="modal-comment-post-form">
+            <input type="text" id="taskPopupCommentTextInput" placeholder="コメントを入力">
+            <button type="button" class="panel-add-button" id="taskPopupPostCommentButton">投稿</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // 【前提】schedule は表示対象のスケジュールオブジェクト。comments はそのスケジュールに
+    //   紐づくコメント全件。
+    // 【処理】名前・進捗バー・メモ（読み取り専用）＋埋め込みコメント欄のHTML文字列を組み立てる。
+    // 【結果】#taskPopupのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderTaskPopupToHtml(schedule, comments) {
+      const progressPercent = PROGRESS_PERCENT_BY_SCHEDULE_STATUS[schedule.taskStatus] ?? 0;
+      const notesText = schedule.notes ? escapeHtmlText(schedule.notes) : "（メモはありません）";
+      return `
+        <div class="task-popup-header">
+          <strong>${escapeHtmlText(schedule.name)}</strong>
+          <button type="button" class="slide-panel-close-button" id="taskPopupCloseButton">×</button>
+        </div>
+        <div class="task-popup-progress-track"><div class="task-popup-progress-fill" style="width:${progressPercent}%"></div></div>
+        <div class="task-popup-progress-label">進捗：${progressPercent}%</div>
+        <div class="task-popup-notes">${notesText}</div>
+        ${renderTaskPopupCommentSectionToHtml(comments)}
+      `;
+    }
+
+    // 【前提】なし。
+    // 【処理】#taskPopupを非表示にし、中身を空にする（closeModalと同じ考え方）。
+    // 【結果】ポップアップが非表示になる。
+    function closeTaskPopup() {
+      const popupElement = document.getElementById("taskPopup");
+      popupElement.hidden = true;
+      popupElement.innerHTML = "";
+    }
+
+    // 【前提】scheduleId はポップアップ表示対象のスケジュールid。clientX/clientY はクリック位置
+    //   （position:fixedでそのまま使えるビューポート座標）。
+    // 【処理】対象スケジュールの内容・コメントでポップアップを組み立てて表示位置を設定する。
+    //   投稿・削除ボタンはinnerHTML再構築を経ても動くよう、#taskPopup自体へのイベント委譲で
+    //   拾う（initializeApp側で1回だけ登録）。
+    // 【結果】ポップアップがクリック位置の近くに表示される。
+    async function openTaskPopup(scheduleId, clientX, clientY) {
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+      const comments = await getCommentsByTask(scheduleId);
+      const popupElement = document.getElementById("taskPopup");
+      popupElement.innerHTML = renderTaskPopupToHtml(scheduleRow.schedule, comments);
+      popupElement.style.left = `${clientX}px`;
+      popupElement.style.top = `${clientY}px`;
+      popupElement.dataset.scheduleId = scheduleId;
+      popupElement.hidden = false;
+    }
+
+    // 【前提】#taskPopupが表示中で、dataset.scheduleIdに対象スケジュールidが入っていること。
+    // 【処理】現在のコメント欄のテキストが空でなければaddCommentで保存し、コメント欄だけを
+    //   最新の内容で再構築する（ポップアップ全体は再構築しない＝進捗・メモ欄はそのまま）。
+    // 【結果】投稿後、コメント一覧が更新される。
+    async function handlePostTaskPopupCommentButtonClick() {
+      const popupElement = document.getElementById("taskPopup");
+      const scheduleId = popupElement.dataset.scheduleId;
+      const textInput = document.getElementById("taskPopupCommentTextInput");
+      if (!scheduleId || !textInput) return;
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addComment({ id: generateId(), taskId: scheduleId, text, createdAt: new Date().toISOString() });
+      await refreshTaskPopupCommentSection(scheduleId);
+    }
+
+    // 【前提】commentId は削除したいコメントのid。#taskPopupのdataset.scheduleIdが設定済み。
+    // 【処理】即時メモの個別削除と同じ方針（確認なし即削除）でdeleteCommentし、
+    //   コメント欄だけを再構築する。
+    // 【結果】削除後、コメント一覧が更新される。
+    async function handleDeleteTaskPopupCommentButtonClick(commentId) {
+      const popupElement = document.getElementById("taskPopup");
+      const scheduleId = popupElement.dataset.scheduleId;
+      await deleteComment(commentId);
+      await refreshTaskPopupCommentSection(scheduleId);
+    }
+
+    // 【前提】scheduleId は表示中のポップアップが対象にしているスケジュールid。
+    // 【処理】最新のコメント一覧を取得し、#taskPopup内のコメント欄部分だけを差し替える。
+    // 【結果】コメント一覧の表示が最新の状態になる（進捗・メモ欄は再構築されない）。
+    async function refreshTaskPopupCommentSection(scheduleId) {
+      const comments = await getCommentsByTask(scheduleId);
+      const sectionElement = document.querySelector("#taskPopup .task-popup-comment-section");
+      if (sectionElement) sectionElement.outerHTML = renderTaskPopupCommentSectionToHtml(comments);
     }
 
     // 【前提】scheduleId は削除したいスケジュールのid。
@@ -6062,6 +6309,44 @@
       });
       document.addEventListener("pointermove", handleBarPointerMove);
       document.addEventListener("pointerup", handleBarPointerUp);
+      // ガントバー直接クリックの軽量ポップアップ（UI差分表No.75）。pointerup直後に発火する
+      // clickイベントで開く。実際にドラッグした場合（wasBarPointerMovedSignificantly）は
+      // 開かない。
+      document.getElementById("ganttPanelBody").addEventListener("click", (event) => {
+        const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
+        if (!barElement) return;
+        if (wasBarPointerMovedSignificantly) {
+          wasBarPointerMovedSignificantly = false;
+          return;
+        }
+        openTaskPopup(barElement.dataset.scheduleId, event.clientX, event.clientY);
+      });
+      // ポップアップの外側をクリックしたら閉じる（別のバーをクリックした場合は、そちらの
+      // ハンドラが新しい内容で開き直すため、ここでは閉じない）。
+      document.addEventListener("click", (event) => {
+        const popupElement = document.getElementById("taskPopup");
+        if (popupElement.hidden) return;
+        if (popupElement.contains(event.target)) return;
+        if (event.target.closest(".gantt-bar")) return;
+        closeTaskPopup();
+      });
+      // ポップアップ内の閉じる・投稿・削除ボタン（コメント欄はinnerHTML再構築を経るため、
+      // #taskPopup自体に1回だけイベント委譲で登録する）。
+      document.getElementById("taskPopup").addEventListener("click", (event) => {
+        if (event.target.id === "taskPopupCloseButton") {
+          closeTaskPopup();
+          return;
+        }
+        if (event.target.id === "taskPopupPostCommentButton") {
+          handlePostTaskPopupCommentButtonClick();
+          return;
+        }
+        const deleteButton = event.target.closest('[data-action="delete-task-popup-comment"]');
+        if (deleteButton) {
+          const item = deleteButton.closest("[data-comment-id]");
+          if (item) handleDeleteTaskPopupCommentButtonClick(item.dataset.commentId);
+        }
+      });
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
