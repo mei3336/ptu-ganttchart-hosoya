@@ -605,6 +605,12 @@
       cursor: grab;
     }
 
+    /* UI差分表No.60：ドラッグ中の見た目（お手本：opacity:.4;transform:scale(.96)）。 */
+    .kanban-card.is-dragging {
+      opacity: .4;
+      transform: scale(.96);
+    }
+
     .kanban-card-main {
       flex: 1;
       min-width: 0;
@@ -6432,6 +6438,13 @@
         if (!draggedCard) return;
         draggedTaskId = draggedCard.dataset.taskId;
         event.dataTransfer.effectAllowed = "move";
+        // UI差分表No.60：ドラッグ中の視覚フィードバック。マインドマップノードの
+        // is-draggingクラスと同じ考え方（見た目だけの一時クラス、dragendで必ず外す）。
+        draggedCard.classList.add("is-dragging");
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("dragend", (event) => {
+        const draggedCard = event.target.closest(".kanban-card[data-task-id]");
+        if (draggedCard) draggedCard.classList.remove("is-dragging");
       });
       document.getElementById("kanbanPanelBody").addEventListener("dragover", (event) => {
         if (event.target.closest(".kanban-column[data-column-status]")) event.preventDefault();
