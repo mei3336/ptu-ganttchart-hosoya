@@ -512,6 +512,12 @@
       background: rgba(0, 0, 0, .18);
     }
 
+    /* UI差分表No.52：バーホバー時の演出（お手本：filter:brightness(.9);box-shadow強調）。 */
+    .gantt-bar:hover {
+      filter: brightness(.9);
+      box-shadow: var(--shadow-medium);
+    }
+
     .gantt-bar.is-bar-dragging {
       opacity: .85;
       box-shadow: var(--shadow-medium);
@@ -548,6 +554,50 @@
       background: #D97706;
       transform: translateX(-10px) rotate(45deg);
       border-radius: 2px;
+    }
+
+    /* UI差分表No.55：マイルストーンのカスタムツールチップ。ブラウザ標準title属性の代わりに
+       data-tooltip属性＋CSSの::after（content:attr()）で、矢印付きの吹き出しを実装する
+       （JS不要）。既定は非表示（opacity:0;visibility:hidden）にし、
+       .gantt-milestone-marker:hoverでフェードインさせる。 */
+    .gantt-milestone-marker::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: -8px;
+      left: -10px;
+      transform: translate(-50%, -100%);
+      background: #292524;
+      color: var(--color-white);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .gantt-milestone-marker::before {
+      content: "";
+      position: absolute;
+      top: -8px;
+      left: -10px;
+      transform: translate(-50%, -100%) translateY(100%);
+      border: 4px solid transparent;
+      border-top-color: #292524;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .gantt-milestone-marker:hover::after,
+    .gantt-milestone-marker:hover::before {
+      opacity: 1;
+      visibility: visible;
     }
 
     /* ===== カンバン（タスク管理） ===== */
@@ -593,10 +643,42 @@
       cursor: grab;
     }
 
+    /* UI差分表No.60：ドラッグ中の見た目（お手本：opacity:.4;transform:scale(.96)）。 */
+    .kanban-card.is-dragging {
+      opacity: .4;
+      transform: scale(.96);
+    }
+
     .kanban-card-main {
       flex: 1;
       min-width: 0;
       cursor: pointer;
+    }
+
+    /* UI差分表No.58：優先度タグの色分けバッジ（お手本：赤/橙/青の色分け）。
+       4(なし)は赤/橙/青のいずれにも当たらないため、中立色（グレー）を追加する。 */
+    .priority-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--color-white);
+    }
+
+    .priority-badge.priority-1 {
+      background: var(--color-danger);
+    }
+
+    .priority-badge.priority-2 {
+      background: #D97706;
+    }
+
+    .priority-badge.priority-3 {
+      background: var(--color-accent);
+    }
+
+    .priority-badge.priority-4 {
+      background: var(--color-text-light);
     }
 
     /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
@@ -923,6 +1005,25 @@
       pointer-events: none;
     }
 
+    /* UI差分表No.76：側面パネルの幅をドラッグで変更するハンドル。左端に薄く常設し、
+       ホバー/ドラッグ中だけアクセント色を表示する。initializePanelResizeHandlesで
+       全スライドパネルの先頭に動的挿入する（7パネル分HTMLへ書かない）。 */
+    .panel-resize-handle {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: ew-resize;
+      z-index: 1;
+      pointer-events: auto;
+    }
+
+    .panel-resize-handle:hover,
+    .panel-resize-handle.is-resizing {
+      background: var(--color-accent);
+    }
+
     .slide-panel.is-open {
       transform: translateX(0);
       pointer-events: auto;
@@ -1097,6 +1198,17 @@
       user-select: none;
     }
 
+    /* UI差分表No.68：グループ見出しの折りたたみ表現。固定の下向き矢印1文字を、
+       開閉状態に応じてCSSトランジションで回転させる（グリフ切り替えではなく回転アニメーション）。 */
+    .cml-chevron {
+      display: inline-block;
+      transition: transform .15s ease;
+    }
+
+    .comment-group-heading.is-collapsed .cml-chevron {
+      transform: rotate(-90deg);
+    }
+
     /* P6：変更履歴のフィルタタブ */
     .changelog-filter-tabs {
       display: flex;
@@ -1132,6 +1244,36 @@
       background: var(--color-danger);
     }
 
+    /* UI差分表No.69：変更前後の値の色分け表示（お手本：.cl-old取り消し線・赤／.cl-new緑）。 */
+    .changelog-changes-list {
+      margin-top: 4px;
+      font-size: 11px;
+    }
+
+    .changelog-change-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: baseline;
+    }
+
+    .changelog-field-label {
+      color: var(--color-text-light);
+    }
+
+    .cl-old {
+      color: var(--color-danger);
+      text-decoration: line-through;
+    }
+
+    .cl-new {
+      color: #16A34A;
+    }
+
+    .changelog-change-arrow {
+      color: var(--color-text-light);
+    }
+
     /* ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
        画面右下に固定表示し、表示時は下からスライドイン、約2.8秒で自動的にスライドアウトして消える。
        非表示時にdisplay:noneにしないのは、スライドイン/アウトのtransitionを効かせるため
@@ -1157,6 +1299,69 @@
     #toast.show {
       opacity: 1;
       transform: translateY(0);
+    }
+
+    /* UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。
+       position:fixedでevent.clientX/clientYにそのまま配置する（スクロール位置の
+       補正が不要になるため）。 */
+    .task-popup {
+      position: fixed;
+      z-index: 150;
+      width: 260px;
+      background: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      padding: 12px;
+      font-size: 12px;
+    }
+
+    .task-popup-comment-section {
+      margin-top: 8px;
+      border-top: 1px solid var(--color-border);
+      padding-top: 8px;
+    }
+
+    .task-popup-comment-section .modal-comment-list {
+      max-height: 100px;
+    }
+
+    .task-popup[hidden] {
+      display: none;
+    }
+
+    .task-popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .task-popup-progress-track {
+      height: 6px;
+      background: var(--color-surface-3);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+
+    .task-popup-progress-fill {
+      height: 100%;
+      background: var(--color-accent);
+    }
+
+    .task-popup-progress-label {
+      font-size: 11px;
+      color: var(--color-text-light);
+      margin-bottom: 8px;
+    }
+
+    .task-popup-notes {
+      color: var(--color-text-mid);
+      white-space: pre-wrap;
+      max-height: 100px;
+      overflow-y: auto;
     }
   </style>
 </head>
@@ -1349,6 +1554,10 @@
   <!-- 共通UI部品：トースト通知（UIデザイン仕様書2.4節）。showToast()がtextContentとshowクラスを
        差し替えるだけの単一の入れ物で、全機能から共通で使い回す。 -->
   <div id="toast"></div>
+
+  <!-- UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。openScheduleModalの
+       中央モーダルとは別物で、クリックしたバーの近くに表示する共通の入れ物。 -->
+  <div id="taskPopup" class="task-popup" hidden></div>
 
   <script>
     "use strict";
@@ -3659,7 +3868,7 @@
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
         .map(
           (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
+            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" data-tooltip="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
         )
         .join("");
 
@@ -3711,9 +3920,11 @@
           : taskListForColumn
               .map((task) => {
                 const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
+                const priorityLabel = TASK_PRIORITY_LABELS[task.priority] || task.priority;
+                const priorityBadgeHtml = `<span class="priority-badge priority-${escapeHtmlText(String(task.priority))}">${escapeHtmlText(priorityLabel)}</span>`;
                 return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}" draggable="true">
                     <div class="kanban-card-main" data-action="edit-task">
-                      <div>${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
+                      <div>${escapeHtmlText(task.title)} ${priorityBadgeHtml}</div>
                       ${dueDateHtml}
                     </div>
                     <button type="button" class="wbs-icon-button" data-action="delete-task" title="削除">🗑</button>
@@ -4479,8 +4690,9 @@
     //   スケジュールのみ）。collapsedScheduleIds は見出しクリックで折りたたまれている
     //   スケジュールidの集合。
     // 【処理】スケジュール名を見出しに、コメント本文・投稿日時・削除ボタンを並べたHTML文字列を
-    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しの矢印を
-    //   ▼→▶に切り替える（中身は非表示だが件数はグルーピング自体には影響しない）。
+    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しにis-collapsed
+    //   クラスを付ける（UI差分表No.68：グリフ切り替えではなく、固定の矢印1文字をCSSで
+    //   回転させて開閉状態を示す。中身は非表示だが件数はグルーピング自体には影響しない）。
     // 【結果】commentPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderCommentGroupsToHtml(commentGroups, collapsedScheduleIds) {
       if (commentGroups.length === 0) {
@@ -4506,8 +4718,8 @@
               </div>`
                 )
                 .join("");
-          const toggleIcon = isGroupCollapsed ? "▶" : "▼";
-          return `<div class="comment-group-heading" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}">${toggleIcon} ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
+          const collapsedHeadingClass = isGroupCollapsed ? " is-collapsed" : "";
+          return `<div class="comment-group-heading${collapsedHeadingClass}" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="cml-chevron">▾</span> ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
         })
         .join("");
     }
@@ -4593,11 +4805,32 @@
     // フィルタ切替時にDB再取得しないためのキャッシュ。
     let currentChangelogEntries = [];
 
+    // 【前提】changes は1件分の変更履歴エントリが持つentry.changes（{field,label,before,after}の
+    //   配列。diffFieldsの戻り値と同じ形）。
+    // 【処理】UI差分表No.69：フィールドごとに「ラベル：旧値（取り消し線・赤）→新値（緑）」の
+    //   行を組み立てる（お手本の.cl-old/.cl-new相当）。
+    // 【結果】変更が無ければ空文字列、あれば一覧のHTML文字列を返す。
+    function renderChangelogChangesToHtml(changes) {
+      if (!changes || changes.length === 0) return "";
+      const rowsHtml = changes
+        .map(
+          (change) => `<div class="changelog-change-row">
+            <span class="changelog-field-label">${escapeHtmlText(change.label)}：</span>
+            <span class="cl-old">${escapeHtmlText(String(change.before ?? ""))}</span>
+            <span class="changelog-change-arrow">→</span>
+            <span class="cl-new">${escapeHtmlText(String(change.after ?? ""))}</span>
+          </div>`
+        )
+        .join("");
+      return `<div class="changelog-changes-list">${rowsHtml}</div>`;
+    }
+
     // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件。filter は
     //   "all" | "add" | "edit" | "delete"。
     // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
     //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。削除ログのみ「戻す」
-    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。
+    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。「変更」ログは
+    //   renderChangelogChangesToHtmlでフィールドごとの新旧値も表示する（UI差分表No.69）。
     // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderChangelogEntriesToHtml(changelogEntries, filter) {
       const filteredEntries = changelogEntries
@@ -4619,6 +4852,7 @@
               <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
               ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
               <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
+              ${renderChangelogChangesToHtml(entry.changes)}
             </div>
             <div class="panel-list-item-actions">${restoreButtonHtml}</div>
           </div>`;
@@ -4768,6 +5002,70 @@
     // 【結果】パネルが閉じる。
     function closeSlidePanel(panelId) {
       document.getElementById(panelId).classList.remove("is-open");
+    }
+
+    // ===== サイドパネルのリサイズハンドル（UI差分表No.76） =====
+    // 【設計判断】7つのスライドパネル（P1〜P6＋マインドマップ）はすべて.slide-panel共通CSSで
+    //   幅640px固定になっている（UI差分表8-3備考）。7箇所のHTMLへ同じハンドルを書く代わりに、
+    //   初期化時に全.slide-panelの先頭へ動的挿入する。ドラッグ処理はマインドマップノードの
+    //   pointerdown/pointermove/pointerupと同じパターン。
+
+    // これ未満の幅にはできない（UIデザイン仕様書：メモパネル同種の記述「最小280px」を
+    // 全パネル共通の下限として採用）。
+    const PANEL_RESIZE_MIN_WIDTH_PX = 280;
+
+    // リサイズ中のパネル要素。ドラッグしていない時はnull。
+    let resizingPanelElement = null;
+    let panelResizeStartPointerX = 0;
+    let panelResizeStartWidthPx = 0;
+
+    // 【前提】なし（DOMContentLoaded後に1度だけ呼ぶ）。
+    // 【処理】すべての.slide-panelの先頭に.panel-resize-handleを1つ挿入する。
+    // 【結果】各パネルの左端にリサイズハンドルが表示される。
+    function initializePanelResizeHandles() {
+      for (const panelElement of document.querySelectorAll(".slide-panel")) {
+        const handleElement = document.createElement("div");
+        handleElement.className = "panel-resize-handle";
+        panelElement.prepend(handleElement);
+      }
+    }
+
+    // 【前提】event は.panel-resize-handle上でのpointerdownイベント。
+    // 【処理】対象パネルとドラッグ開始時点のポインタ座標・パネル幅を記録する。
+    // 【結果】リサイズ状態が開始される（実際の幅変更はpointermoveハンドラが行う）。
+    function handlePanelResizePointerDown(event) {
+      const handleElement = event.target.closest(".panel-resize-handle");
+      if (!handleElement) return;
+      resizingPanelElement = handleElement.closest(".slide-panel");
+      if (!resizingPanelElement) return;
+      panelResizeStartPointerX = event.clientX;
+      panelResizeStartWidthPx = resizingPanelElement.getBoundingClientRect().width;
+      handleElement.classList.add("is-resizing");
+      handleElement.setPointerCapture(event.pointerId);
+    }
+
+    // 【前提】resizingPanelElementが設定済み（リサイズ中）であること。
+    // 【処理】ポインタの移動量ぶん幅を変更する。パネルは画面右端に固定（right:0）のため、
+    //   左端のハンドルを左へ引くほど幅が増える（移動量の符号を反転させて加算）。
+    //   下限PANEL_RESIZE_MIN_WIDTH_PX・上限92vw（既存のmax-widthと同じ）でクランプする。
+    // 【結果】パネルの見た目の幅がポインタに追従する。
+    function handlePanelResizePointerMove(event) {
+      if (!resizingPanelElement) return;
+      const deltaX = event.clientX - panelResizeStartPointerX;
+      const newWidthPx = panelResizeStartWidthPx - deltaX;
+      const maxWidthPx = window.innerWidth * 0.92;
+      const clampedWidthPx = Math.min(Math.max(newWidthPx, PANEL_RESIZE_MIN_WIDTH_PX), maxWidthPx);
+      resizingPanelElement.style.width = `${clampedWidthPx}px`;
+    }
+
+    // 【前提】なし。
+    // 【処理】リサイズ中のハンドルからis-resizingクラスを外し、状態をリセットする。
+    // 【結果】ドラッグが終了する（幅はその時点の値のまま維持される。DB保存はしない＝
+    //   画面上だけの一時状態。collapsedScheduleIds等と同じ設計判断）。
+    function handlePanelResizePointerUp() {
+      if (!resizingPanelElement) return;
+      resizingPanelElement.querySelector(".panel-resize-handle.is-resizing")?.classList.remove("is-resizing");
+      resizingPanelElement = null;
     }
 
     // ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
@@ -5564,6 +5862,11 @@
     let barDragStartStartDate = "";
     let barDragStartEndDate = "";
     let barDragPixelsPerDay = 0;
+    // これ未満の移動量は「クリック」とみなす（MINDMAP_DRAG_THRESHOLD_PXと同じ考え方）。
+    // pointerup直後に発火するclickイベントで、実際にドラッグした場合だけタスクポップアップを
+    // 開かせないようにするため、handleBarPointerUpが移動量を判定してこの変数に記録する。
+    const BAR_CLICK_VS_DRAG_THRESHOLD_PX = 3;
+    let wasBarPointerMovedSignificantly = false;
 
     // 【前提】rootScheduleId は起点スケジュールのid。allSchedules は同一プロジェクト内の
     //   全スケジュール。
@@ -5657,6 +5960,8 @@
       const mode = draggedBarMode;
       draggedBarScheduleId = null;
       draggedBarMode = null;
+      wasBarPointerMovedSignificantly =
+        Math.abs(event.clientX - barDragStartPointerX) >= BAR_CLICK_VS_DRAG_THRESHOLD_PX;
 
       const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${scheduleId}"]`);
       if (barElement) barElement.classList.remove("is-bar-dragging");
@@ -5703,6 +6008,129 @@
 
       await refreshGanttPanel(currentSelectedProjectId);
       showToast("スケジュールを更新しました");
+    }
+
+    // ===== ガントバー直接クリックの軽量ポップアップ（UI差分表No.75／対応表No.17） =====
+    // 【設計判断】既存のopenScheduleModal（中央モーダル・フォーム編集）とは別物。クリックした
+    //   バーの近くに表示する読み取り専用の簡易ポップアップで、名前・進捗・メモを確認できる。
+    //   #taskPopupという共通の入れ物1つを使い回す（#toast/#modalOverlayと同じ設計）。
+    //   進捗率の算出根拠：対応表No.17の抜粋にはdur（日数）はあるが%の算出式が現れておらず、
+    //   データモデルにも数値の進捗フィールドが無い。ここではステータス
+    //   （未着手0%／進行中50%／完了100%）から簡易に算出する（要判断事項として明示）。
+    const PROGRESS_PERCENT_BY_SCHEDULE_STATUS = { todo: 0, inprogress: 50, done: 100 };
+
+    // 【前提】comments は対象スケジュールに紐づくコメント全件（無ければ空配列）。
+    // 【処理】投稿日時の昇順に並べ、削除ボタン付きの一覧＋投稿フォームのHTML文字列を組み立てる
+    //   （renderModalCommentSectionToHtmlと同じ考え方。taskPopupは編集モーダルと同時に
+    //   開いている可能性があるため、id・data-actionをモーダル側とは別にして重複を避ける）。
+    // 【結果】ポップアップのコメント欄に入れられるHTML文字列を返す。
+    function renderTaskPopupCommentSectionToHtml(comments) {
+      const sortedComments = comments.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const commentListHtml = sortedComments.length > 0
+        ? sortedComments
+            .map(
+              (comment) => `<div class="panel-list-item" data-comment-id="${escapeHtmlText(comment.id)}">
+                <div class="panel-list-item-main">
+                  <div>${escapeHtmlText(comment.text)}</div>
+                  <div class="panel-list-item-meta">${escapeHtmlText(comment.createdAt)}</div>
+                </div>
+                <div class="panel-list-item-actions">
+                  <button type="button" class="wbs-icon-button" data-action="delete-task-popup-comment" title="削除">🗑</button>
+                </div>
+              </div>`
+            )
+            .join("")
+        : '<p class="empty-state-message">コメントはまだありません。</p>';
+      return `
+        <div class="task-popup-comment-section">
+          <div class="modal-comment-list">${commentListHtml}</div>
+          <div class="modal-comment-post-form">
+            <input type="text" id="taskPopupCommentTextInput" placeholder="コメントを入力">
+            <button type="button" class="panel-add-button" id="taskPopupPostCommentButton">投稿</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // 【前提】schedule は表示対象のスケジュールオブジェクト。comments はそのスケジュールに
+    //   紐づくコメント全件。
+    // 【処理】名前・進捗バー・メモ（読み取り専用）＋埋め込みコメント欄のHTML文字列を組み立てる。
+    // 【結果】#taskPopupのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderTaskPopupToHtml(schedule, comments) {
+      const progressPercent = PROGRESS_PERCENT_BY_SCHEDULE_STATUS[schedule.taskStatus] ?? 0;
+      const notesText = schedule.notes ? escapeHtmlText(schedule.notes) : "（メモはありません）";
+      return `
+        <div class="task-popup-header">
+          <strong>${escapeHtmlText(schedule.name)}</strong>
+          <button type="button" class="slide-panel-close-button" id="taskPopupCloseButton">×</button>
+        </div>
+        <div class="task-popup-progress-track"><div class="task-popup-progress-fill" style="width:${progressPercent}%"></div></div>
+        <div class="task-popup-progress-label">進捗：${progressPercent}%</div>
+        <div class="task-popup-notes">${notesText}</div>
+        ${renderTaskPopupCommentSectionToHtml(comments)}
+      `;
+    }
+
+    // 【前提】なし。
+    // 【処理】#taskPopupを非表示にし、中身を空にする（closeModalと同じ考え方）。
+    // 【結果】ポップアップが非表示になる。
+    function closeTaskPopup() {
+      const popupElement = document.getElementById("taskPopup");
+      popupElement.hidden = true;
+      popupElement.innerHTML = "";
+    }
+
+    // 【前提】scheduleId はポップアップ表示対象のスケジュールid。clientX/clientY はクリック位置
+    //   （position:fixedでそのまま使えるビューポート座標）。
+    // 【処理】対象スケジュールの内容・コメントでポップアップを組み立てて表示位置を設定する。
+    //   投稿・削除ボタンはinnerHTML再構築を経ても動くよう、#taskPopup自体へのイベント委譲で
+    //   拾う（initializeApp側で1回だけ登録）。
+    // 【結果】ポップアップがクリック位置の近くに表示される。
+    async function openTaskPopup(scheduleId, clientX, clientY) {
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+      const comments = await getCommentsByTask(scheduleId);
+      const popupElement = document.getElementById("taskPopup");
+      popupElement.innerHTML = renderTaskPopupToHtml(scheduleRow.schedule, comments);
+      popupElement.style.left = `${clientX}px`;
+      popupElement.style.top = `${clientY}px`;
+      popupElement.dataset.scheduleId = scheduleId;
+      popupElement.hidden = false;
+    }
+
+    // 【前提】#taskPopupが表示中で、dataset.scheduleIdに対象スケジュールidが入っていること。
+    // 【処理】現在のコメント欄のテキストが空でなければaddCommentで保存し、コメント欄だけを
+    //   最新の内容で再構築する（ポップアップ全体は再構築しない＝進捗・メモ欄はそのまま）。
+    // 【結果】投稿後、コメント一覧が更新される。
+    async function handlePostTaskPopupCommentButtonClick() {
+      const popupElement = document.getElementById("taskPopup");
+      const scheduleId = popupElement.dataset.scheduleId;
+      const textInput = document.getElementById("taskPopupCommentTextInput");
+      if (!scheduleId || !textInput) return;
+      const text = textInput.value.trim();
+      if (!text) return;
+      await addComment({ id: generateId(), taskId: scheduleId, text, createdAt: new Date().toISOString() });
+      await refreshTaskPopupCommentSection(scheduleId);
+    }
+
+    // 【前提】commentId は削除したいコメントのid。#taskPopupのdataset.scheduleIdが設定済み。
+    // 【処理】即時メモの個別削除と同じ方針（確認なし即削除）でdeleteCommentし、
+    //   コメント欄だけを再構築する。
+    // 【結果】削除後、コメント一覧が更新される。
+    async function handleDeleteTaskPopupCommentButtonClick(commentId) {
+      const popupElement = document.getElementById("taskPopup");
+      const scheduleId = popupElement.dataset.scheduleId;
+      await deleteComment(commentId);
+      await refreshTaskPopupCommentSection(scheduleId);
+    }
+
+    // 【前提】scheduleId は表示中のポップアップが対象にしているスケジュールid。
+    // 【処理】最新のコメント一覧を取得し、#taskPopup内のコメント欄部分だけを差し替える。
+    // 【結果】コメント一覧の表示が最新の状態になる（進捗・メモ欄は再構築されない）。
+    async function refreshTaskPopupCommentSection(scheduleId) {
+      const comments = await getCommentsByTask(scheduleId);
+      const sectionElement = document.querySelector("#taskPopup .task-popup-comment-section");
+      if (sectionElement) sectionElement.outerHTML = renderTaskPopupCommentSectionToHtml(comments);
     }
 
     // 【前提】scheduleId は削除したいスケジュールのid。
@@ -6370,6 +6798,10 @@
     // 【結果】画面を開いた直後から、先頭プロジェクトのデータが3パネルに表示された状態になる
     //   （プロジェクトが1件も無い場合は空状態表示のまま）。
     async function initializeApp() {
+      initializePanelResizeHandles();
+      document.addEventListener("pointerdown", handlePanelResizePointerDown);
+      document.addEventListener("pointermove", handlePanelResizePointerMove);
+      document.addEventListener("pointerup", handlePanelResizePointerUp);
       document.getElementById("projectSelectDropdown").addEventListener("change", (event) => {
         switchToProject(event.target.value || null);
       });
@@ -6413,6 +6845,44 @@
       document.addEventListener("pointerup", handleBarPointerUp);
       document.addEventListener("pointermove", handleGanttBackgroundPointerMove);
       document.addEventListener("pointerup", handleGanttBackgroundPointerUp);
+      // ガントバー直接クリックの軽量ポップアップ（UI差分表No.75）。pointerup直後に発火する
+      // clickイベントで開く。実際にドラッグした場合（wasBarPointerMovedSignificantly）は
+      // 開かない。
+      document.getElementById("ganttPanelBody").addEventListener("click", (event) => {
+        const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
+        if (!barElement) return;
+        if (wasBarPointerMovedSignificantly) {
+          wasBarPointerMovedSignificantly = false;
+          return;
+        }
+        openTaskPopup(barElement.dataset.scheduleId, event.clientX, event.clientY);
+      });
+      // ポップアップの外側をクリックしたら閉じる（別のバーをクリックした場合は、そちらの
+      // ハンドラが新しい内容で開き直すため、ここでは閉じない）。
+      document.addEventListener("click", (event) => {
+        const popupElement = document.getElementById("taskPopup");
+        if (popupElement.hidden) return;
+        if (popupElement.contains(event.target)) return;
+        if (event.target.closest(".gantt-bar")) return;
+        closeTaskPopup();
+      });
+      // ポップアップ内の閉じる・投稿・削除ボタン（コメント欄はinnerHTML再構築を経るため、
+      // #taskPopup自体に1回だけイベント委譲で登録する）。
+      document.getElementById("taskPopup").addEventListener("click", (event) => {
+        if (event.target.id === "taskPopupCloseButton") {
+          closeTaskPopup();
+          return;
+        }
+        if (event.target.id === "taskPopupPostCommentButton") {
+          handlePostTaskPopupCommentButtonClick();
+          return;
+        }
+        const deleteButton = event.target.closest('[data-action="delete-task-popup-comment"]');
+        if (deleteButton) {
+          const item = deleteButton.closest("[data-comment-id]");
+          if (item) handleDeleteTaskPopupCommentButtonClick(item.dataset.commentId);
+        }
+      });
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
@@ -6470,6 +6940,13 @@
         if (!draggedCard) return;
         draggedTaskId = draggedCard.dataset.taskId;
         event.dataTransfer.effectAllowed = "move";
+        // UI差分表No.60：ドラッグ中の視覚フィードバック。マインドマップノードの
+        // is-draggingクラスと同じ考え方（見た目だけの一時クラス、dragendで必ず外す）。
+        draggedCard.classList.add("is-dragging");
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("dragend", (event) => {
+        const draggedCard = event.target.closest(".kanban-card[data-task-id]");
+        if (draggedCard) draggedCard.classList.remove("is-dragging");
       });
       document.getElementById("kanbanPanelBody").addEventListener("dragover", (event) => {
         if (event.target.closest(".kanban-column[data-column-status]")) event.preventDefault();
