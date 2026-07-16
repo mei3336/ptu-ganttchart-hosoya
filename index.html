@@ -1135,6 +1135,17 @@
       user-select: none;
     }
 
+    /* UI差分表No.68：グループ見出しの折りたたみ表現。固定の下向き矢印1文字を、
+       開閉状態に応じてCSSトランジションで回転させる（グリフ切り替えではなく回転アニメーション）。 */
+    .cml-chevron {
+      display: inline-block;
+      transition: transform .15s ease;
+    }
+
+    .comment-group-heading.is-collapsed .cml-chevron {
+      transform: rotate(-90deg);
+    }
+
     /* P6：変更履歴のフィルタタブ */
     .changelog-filter-tabs {
       display: flex;
@@ -4378,8 +4389,9 @@
     //   スケジュールのみ）。collapsedScheduleIds は見出しクリックで折りたたまれている
     //   スケジュールidの集合。
     // 【処理】スケジュール名を見出しに、コメント本文・投稿日時・削除ボタンを並べたHTML文字列を
-    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しの矢印を
-    //   ▼→▶に切り替える（中身は非表示だが件数はグルーピング自体には影響しない）。
+    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しにis-collapsed
+    //   クラスを付ける（UI差分表No.68：グリフ切り替えではなく、固定の矢印1文字をCSSで
+    //   回転させて開閉状態を示す。中身は非表示だが件数はグルーピング自体には影響しない）。
     // 【結果】commentPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderCommentGroupsToHtml(commentGroups, collapsedScheduleIds) {
       if (commentGroups.length === 0) {
@@ -4405,8 +4417,8 @@
               </div>`
                 )
                 .join("");
-          const toggleIcon = isGroupCollapsed ? "▶" : "▼";
-          return `<div class="comment-group-heading" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}">${toggleIcon} ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
+          const collapsedHeadingClass = isGroupCollapsed ? " is-collapsed" : "";
+          return `<div class="comment-group-heading${collapsedHeadingClass}" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="cml-chevron">▾</span> ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
         })
         .join("");
     }
