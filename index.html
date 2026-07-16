@@ -1181,6 +1181,36 @@
       background: var(--color-danger);
     }
 
+    /* UI差分表No.69：変更前後の値の色分け表示（お手本：.cl-old取り消し線・赤／.cl-new緑）。 */
+    .changelog-changes-list {
+      margin-top: 4px;
+      font-size: 11px;
+    }
+
+    .changelog-change-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: baseline;
+    }
+
+    .changelog-field-label {
+      color: var(--color-text-light);
+    }
+
+    .cl-old {
+      color: var(--color-danger);
+      text-decoration: line-through;
+    }
+
+    .cl-new {
+      color: #16A34A;
+    }
+
+    .changelog-change-arrow {
+      color: var(--color-text-light);
+    }
+
     /* ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
        画面右下に固定表示し、表示時は下からスライドイン、約2.8秒で自動的にスライドアウトして消える。
        非表示時にdisplay:noneにしないのは、スライドイン/アウトのtransitionを効かせるため
@@ -4504,11 +4534,32 @@
     // フィルタ切替時にDB再取得しないためのキャッシュ。
     let currentChangelogEntries = [];
 
+    // 【前提】changes は1件分の変更履歴エントリが持つentry.changes（{field,label,before,after}の
+    //   配列。diffFieldsの戻り値と同じ形）。
+    // 【処理】UI差分表No.69：フィールドごとに「ラベル：旧値（取り消し線・赤）→新値（緑）」の
+    //   行を組み立てる（お手本の.cl-old/.cl-new相当）。
+    // 【結果】変更が無ければ空文字列、あれば一覧のHTML文字列を返す。
+    function renderChangelogChangesToHtml(changes) {
+      if (!changes || changes.length === 0) return "";
+      const rowsHtml = changes
+        .map(
+          (change) => `<div class="changelog-change-row">
+            <span class="changelog-field-label">${escapeHtmlText(change.label)}：</span>
+            <span class="cl-old">${escapeHtmlText(String(change.before ?? ""))}</span>
+            <span class="changelog-change-arrow">→</span>
+            <span class="cl-new">${escapeHtmlText(String(change.after ?? ""))}</span>
+          </div>`
+        )
+        .join("");
+      return `<div class="changelog-changes-list">${rowsHtml}</div>`;
+    }
+
     // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件。filter は
     //   "all" | "add" | "edit" | "delete"。
     // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
     //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。削除ログのみ「戻す」
-    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。
+    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。「変更」ログは
+    //   renderChangelogChangesToHtmlでフィールドごとの新旧値も表示する（UI差分表No.69）。
     // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderChangelogEntriesToHtml(changelogEntries, filter) {
       const filteredEntries = changelogEntries
@@ -4530,6 +4581,7 @@
               <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
               ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
               <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
+              ${renderChangelogChangesToHtml(entry.changes)}
             </div>
             <div class="panel-list-item-actions">${restoreButtonHtml}</div>
           </div>`;
