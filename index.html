@@ -426,6 +426,13 @@
 
     .gantt-body {
       position: relative;
+      cursor: grab;
+    }
+
+    /* UI差分表No.42：背景ドラッグ中のカーソル（地図アプリの「掴んでいる」表現）。 */
+    .gantt-scroll-area.is-background-dragging,
+    .gantt-scroll-area.is-background-dragging .gantt-body {
+      cursor: grabbing;
     }
 
     .gantt-row-background {
@@ -6254,6 +6261,64 @@
       isSyncingVerticalScroll = false;
     }
 
+    // ===== ガント背景ドラッグによる自動スクロール（対応表No.42） =====
+    // 【設計判断】ganttPanelBodyへのpointerdownは、既存のバードラッグ処理
+    //   （handleBarPointerDown呼び出し側）が「.gantt-bar要素が見つかった場合のみ」処理する
+    //   分岐になっている。背景ドラッグはその逆＝「.gantt-bar要素が見つからなかった場合」に
+    //   だけ開始するため、既存のバー操作とは完全に排他で干渉しない（同じイベントの中で
+    //   if/elseのどちらか一方だけが実行される）。
+    //   ドラッグ中の状態はisBackgroundDraggingという専用フラグで管理し、バードラッグの
+    //   draggedBarScheduleIdとは別の変数のため、document側のpointermove/pointerupリスナーも
+    //   互いのフラグを見て自分の担当外なら何もしないだけで、取り合いにならない。
+    //   スクロール位置の直接書き換えは.gantt-scroll-areaのscrollイベントを発火させるため、
+    //   対応表No.41で実装したhandleGanttScrollAreaVerticalScrollが自動的にWBSパネルを
+    //   追従させる（背景ドラッグ用に別の同期処理は不要）。
+
+    // ドラッグ中かどうか。ドラッグ開始時点のポインタ座標・スクロール位置も保持する。
+    let isBackgroundDragging = false;
+    let backgroundDragStartClientX = 0;
+    let backgroundDragStartClientY = 0;
+    let backgroundDragStartScrollLeft = 0;
+    let backgroundDragStartScrollTop = 0;
+
+    // 【前提】event はganttPanelBody上でのpointerdownイベントのうち、.gantt-bar要素にも
+    //   .gantt-bar-handleにも当たらなかった場合（＝何もない背景／グリッド部分）にのみ呼ばれる。
+    // 【処理】ドラッグ開始時点のポインタ座標と、.gantt-scroll-areaの現在のスクロール位置を
+    //   記録する。カーソルを「掴んでいる」見た目にするクラスを付ける。
+    // 【結果】背景ドラッグの状態が開始される（実際のスクロールはpointermoveハンドラが行う）。
+    function handleGanttBackgroundPointerDown(event) {
+      isBackgroundDragging = true;
+      backgroundDragStartClientX = event.clientX;
+      backgroundDragStartClientY = event.clientY;
+      const scrollAreaElement = document.querySelector(".gantt-scroll-area");
+      backgroundDragStartScrollLeft = scrollAreaElement.scrollLeft;
+      backgroundDragStartScrollTop = scrollAreaElement.scrollTop;
+      scrollAreaElement.classList.add("is-background-dragging");
+    }
+
+    // 【前提】isBackgroundDraggingが設定済み（ドラッグ中）であること。
+    // 【処理】ポインタの移動量を計算し、地図アプリと同じ向き（ポインタを右へ動かす＝
+    //   コンテンツを右へ引く＝スクロール位置は左へ動く）でscrollLeft/scrollTopを
+    //   「開始時のスクロール位置－移動量」に設定する。
+    // 【結果】ガント本体（および対応表No.41の同期によりWBSパネルも）がポインタに追従してスクロールする。
+    function handleGanttBackgroundPointerMove(event) {
+      if (!isBackgroundDragging) return;
+      const deltaX = event.clientX - backgroundDragStartClientX;
+      const deltaY = event.clientY - backgroundDragStartClientY;
+      const scrollAreaElement = document.querySelector(".gantt-scroll-area");
+      scrollAreaElement.scrollLeft = backgroundDragStartScrollLeft - deltaX;
+      scrollAreaElement.scrollTop = backgroundDragStartScrollTop - deltaY;
+    }
+
+    // 【前提】なし。
+    // 【処理】ドラッグ状態を終了し、カーソルの見た目を元に戻す。
+    // 【結果】背景ドラッグが終了する。
+    function handleGanttBackgroundPointerUp() {
+      if (!isBackgroundDragging) return;
+      isBackgroundDragging = false;
+      document.querySelector(".gantt-scroll-area").classList.remove("is-background-dragging");
+    }
+
     // 【前提】granularity は "day" | "week" | "month" | "quarter"。buttonElement はクリックされたボタン。
     // 【処理】表示粒度を切り替え、ボタンの選択状態を更新した上でガントパネルを再描画する
     //   （DBへの再問い合わせは不要。currentProjectObjectの日付情報だけで再計算できるため）。
@@ -6334,13 +6399,20 @@
       // （マインドマップと同じ理由でpointermove/pointerupはdocument側で拾う）。
       document.getElementById("ganttPanelBody").addEventListener("pointerdown", (event) => {
         const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
-        if (!barElement) return;
+        if (!barElement) {
+          // UI差分表No.42：バー・掴み手のどちらにも当たらなかった場合だけ背景ドラッグを開始する
+          // （既存のバー操作とは完全に排他）。
+          handleGanttBackgroundPointerDown(event);
+          return;
+        }
         const handleElement = event.target.closest(".gantt-bar-handle");
         const mode = handleElement ? handleElement.dataset.dragMode : "move";
         handleBarPointerDown(event, barElement.dataset.scheduleId, mode, barElement);
       });
       document.addEventListener("pointermove", handleBarPointerMove);
       document.addEventListener("pointerup", handleBarPointerUp);
+      document.addEventListener("pointermove", handleGanttBackgroundPointerMove);
+      document.addEventListener("pointerup", handleGanttBackgroundPointerUp);
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
