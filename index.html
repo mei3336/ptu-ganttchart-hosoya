@@ -4774,9 +4774,10 @@
       const todayDateString = new Date().toISOString().slice(0, 10);
       const oneYearLaterDate = new Date();
             oneYearLaterDate.setFullYear(oneYearLaterDate.getFullYear() + 1);
+      const oneYearLaterDateString = oneYearLaterDate.toISOString().slice(0, 10);
       const nameValue = isEditMode ? project.name : "";
       const startDateValue = isEditMode ? project.startDate : todayDateString;
-      const endDateValue = isEditMode ? project.endDate : oneYearLaterDate;
+      const endDateValue = isEditMode ? project.endDate : oneYearLaterDateString;
       return `
         <h2>${isEditMode ? "プロジェクト編集" : "新規プロジェクト作成"}</h2>
         <div class="modal-field">
