@@ -605,10 +605,42 @@
       cursor: grab;
     }
 
+    /* UI差分表No.60：ドラッグ中の見た目（お手本：opacity:.4;transform:scale(.96)）。 */
+    .kanban-card.is-dragging {
+      opacity: .4;
+      transform: scale(.96);
+    }
+
     .kanban-card-main {
       flex: 1;
       min-width: 0;
       cursor: pointer;
+    }
+
+    /* UI差分表No.58：優先度タグの色分けバッジ（お手本：赤/橙/青の色分け）。
+       4(なし)は赤/橙/青のいずれにも当たらないため、中立色（グレー）を追加する。 */
+    .priority-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--color-white);
+    }
+
+    .priority-badge.priority-1 {
+      background: var(--color-danger);
+    }
+
+    .priority-badge.priority-2 {
+      background: #D97706;
+    }
+
+    .priority-badge.priority-3 {
+      background: var(--color-accent);
+    }
+
+    .priority-badge.priority-4 {
+      background: var(--color-text-light);
     }
 
     /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
@@ -1103,6 +1135,17 @@
       user-select: none;
     }
 
+    /* UI差分表No.68：グループ見出しの折りたたみ表現。固定の下向き矢印1文字を、
+       開閉状態に応じてCSSトランジションで回転させる（グリフ切り替えではなく回転アニメーション）。 */
+    .cml-chevron {
+      display: inline-block;
+      transition: transform .15s ease;
+    }
+
+    .comment-group-heading.is-collapsed .cml-chevron {
+      transform: rotate(-90deg);
+    }
+
     /* P6：変更履歴のフィルタタブ */
     .changelog-filter-tabs {
       display: flex;
@@ -1136,6 +1179,36 @@
 
     .changelog-action-badge.is-delete {
       background: var(--color-danger);
+    }
+
+    /* UI差分表No.69：変更前後の値の色分け表示（お手本：.cl-old取り消し線・赤／.cl-new緑）。 */
+    .changelog-changes-list {
+      margin-top: 4px;
+      font-size: 11px;
+    }
+
+    .changelog-change-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: baseline;
+    }
+
+    .changelog-field-label {
+      color: var(--color-text-light);
+    }
+
+    .cl-old {
+      color: var(--color-danger);
+      text-decoration: line-through;
+    }
+
+    .cl-new {
+      color: #16A34A;
+    }
+
+    .changelog-change-arrow {
+      color: var(--color-text-light);
     }
 
     /* ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
@@ -3778,9 +3851,11 @@
           : taskListForColumn
               .map((task) => {
                 const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
+                const priorityLabel = TASK_PRIORITY_LABELS[task.priority] || task.priority;
+                const priorityBadgeHtml = `<span class="priority-badge priority-${escapeHtmlText(String(task.priority))}">${escapeHtmlText(priorityLabel)}</span>`;
                 return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}" draggable="true">
                     <div class="kanban-card-main" data-action="edit-task">
-                      <div>${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
+                      <div>${escapeHtmlText(task.title)} ${priorityBadgeHtml}</div>
                       ${dueDateHtml}
                     </div>
                     <button type="button" class="wbs-icon-button" data-action="delete-task" title="削除">🗑</button>
@@ -4344,8 +4419,9 @@
     //   スケジュールのみ）。collapsedScheduleIds は見出しクリックで折りたたまれている
     //   スケジュールidの集合。
     // 【処理】スケジュール名を見出しに、コメント本文・投稿日時・削除ボタンを並べたHTML文字列を
-    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しの矢印を
-    //   ▼→▶に切り替える（中身は非表示だが件数はグルーピング自体には影響しない）。
+    //   組み立てる。折りたたまれているグループはコメント本文一覧を省略し、見出しにis-collapsed
+    //   クラスを付ける（UI差分表No.68：グリフ切り替えではなく、固定の矢印1文字をCSSで
+    //   回転させて開閉状態を示す。中身は非表示だが件数はグルーピング自体には影響しない）。
     // 【結果】commentPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderCommentGroupsToHtml(commentGroups, collapsedScheduleIds) {
       if (commentGroups.length === 0) {
@@ -4371,8 +4447,8 @@
               </div>`
                 )
                 .join("");
-          const toggleIcon = isGroupCollapsed ? "▶" : "▼";
-          return `<div class="comment-group-heading" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}">${toggleIcon} ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
+          const collapsedHeadingClass = isGroupCollapsed ? " is-collapsed" : "";
+          return `<div class="comment-group-heading${collapsedHeadingClass}" data-action="toggle-comment-group" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="cml-chevron">▾</span> ${escapeHtmlText(schedule.name)}</div>${commentsHtml}`;
         })
         .join("");
     }
@@ -4458,11 +4534,32 @@
     // フィルタ切替時にDB再取得しないためのキャッシュ。
     let currentChangelogEntries = [];
 
+    // 【前提】changes は1件分の変更履歴エントリが持つentry.changes（{field,label,before,after}の
+    //   配列。diffFieldsの戻り値と同じ形）。
+    // 【処理】UI差分表No.69：フィールドごとに「ラベル：旧値（取り消し線・赤）→新値（緑）」の
+    //   行を組み立てる（お手本の.cl-old/.cl-new相当）。
+    // 【結果】変更が無ければ空文字列、あれば一覧のHTML文字列を返す。
+    function renderChangelogChangesToHtml(changes) {
+      if (!changes || changes.length === 0) return "";
+      const rowsHtml = changes
+        .map(
+          (change) => `<div class="changelog-change-row">
+            <span class="changelog-field-label">${escapeHtmlText(change.label)}：</span>
+            <span class="cl-old">${escapeHtmlText(String(change.before ?? ""))}</span>
+            <span class="changelog-change-arrow">→</span>
+            <span class="cl-new">${escapeHtmlText(String(change.after ?? ""))}</span>
+          </div>`
+        )
+        .join("");
+      return `<div class="changelog-changes-list">${rowsHtml}</div>`;
+    }
+
     // 【前提】changelogEntries は同一プロジェクト内の変更履歴全件。filter は
     //   "all" | "add" | "edit" | "delete"。
     // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
     //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。削除ログのみ「戻す」
-    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。
+    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。「変更」ログは
+    //   renderChangelogChangesToHtmlでフィールドごとの新旧値も表示する（UI差分表No.69）。
     // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderChangelogEntriesToHtml(changelogEntries, filter) {
       const filteredEntries = changelogEntries
@@ -4484,6 +4581,7 @@
               <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
               ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
               <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
+              ${renderChangelogChangesToHtml(entry.changes)}
             </div>
             <div class="panel-list-item-actions">${restoreButtonHtml}</div>
           </div>`;
@@ -6404,6 +6502,13 @@
         if (!draggedCard) return;
         draggedTaskId = draggedCard.dataset.taskId;
         event.dataTransfer.effectAllowed = "move";
+        // UI差分表No.60：ドラッグ中の視覚フィードバック。マインドマップノードの
+        // is-draggingクラスと同じ考え方（見た目だけの一時クラス、dragendで必ず外す）。
+        draggedCard.classList.add("is-dragging");
+      });
+      document.getElementById("kanbanPanelBody").addEventListener("dragend", (event) => {
+        const draggedCard = event.target.closest(".kanban-card[data-task-id]");
+        if (draggedCard) draggedCard.classList.remove("is-dragging");
       });
       document.getElementById("kanbanPanelBody").addEventListener("dragover", (event) => {
         if (event.target.closest(".kanban-column[data-column-status]")) event.preventDefault();
