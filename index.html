@@ -611,6 +611,32 @@
       cursor: pointer;
     }
 
+    /* UI差分表No.58：優先度タグの色分けバッジ（お手本：赤/橙/青の色分け）。
+       4(なし)は赤/橙/青のいずれにも当たらないため、中立色（グレー）を追加する。 */
+    .priority-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--color-white);
+    }
+
+    .priority-badge.priority-1 {
+      background: var(--color-danger);
+    }
+
+    .priority-badge.priority-2 {
+      background: #D97706;
+    }
+
+    .priority-badge.priority-3 {
+      background: var(--color-accent);
+    }
+
+    .priority-badge.priority-4 {
+      background: var(--color-text-light);
+    }
+
     /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
     .mindmap-canvas {
       position: relative;
@@ -3778,9 +3804,11 @@
           : taskListForColumn
               .map((task) => {
                 const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
+                const priorityLabel = TASK_PRIORITY_LABELS[task.priority] || task.priority;
+                const priorityBadgeHtml = `<span class="priority-badge priority-${escapeHtmlText(String(task.priority))}">${escapeHtmlText(priorityLabel)}</span>`;
                 return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}" draggable="true">
                     <div class="kanban-card-main" data-action="edit-task">
-                      <div>${escapeHtmlText(task.title)}（優先度：${TASK_PRIORITY_LABELS[task.priority] || task.priority}）</div>
+                      <div>${escapeHtmlText(task.title)} ${priorityBadgeHtml}</div>
                       ${dueDateHtml}
                     </div>
                     <button type="button" class="wbs-icon-button" data-action="delete-task" title="削除">🗑</button>
