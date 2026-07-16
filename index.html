@@ -3742,7 +3742,7 @@
       const taskList = await getTasksByProject(currentSelectedProjectId);
       const doneTasks = taskList.filter((task) => task.status === "done");
       if (doneTasks.length === 0) {
-        window.alert("完了タスクがありません");
+        showToast("完了タスクがありません");
         return;
       }
       if (!window.confirm(`完了済み${doneTasks.length}件を削除しますか？`)) return;
@@ -3761,7 +3761,7 @@
           createdAt: new Date().toISOString(),
         });
       }
-      window.alert("完了済みタスクを削除しました");
+      showToast("完了タスクを削除しました");
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
@@ -4246,12 +4246,12 @@
     // 【結果】確認OK時、このプロジェクトの変更履歴がすべて削除され、パネルが再描画される。
     async function handleClearChangelogButtonClick() {
       if (currentChangelogEntries.length === 0) {
-        window.alert("履歴がありません");
+        showToast("履歴がありません");
         return;
       }
       if (!window.confirm(`${currentChangelogEntries.length}件の変更履歴を削除しますか？`)) return;
       await clearChangelogByProject(currentSelectedProjectId);
-      window.alert("変更履歴を削除しました");
+      showToast("変更履歴を削除しました");
       await refreshChangelogPanel(currentSelectedProjectId);
     }
 
@@ -4281,7 +4281,7 @@
       const entry = currentChangelogEntries.find((changelogEntry) => changelogEntry.id === entryId);
       if (!entry) return;
       if (!entry.snapshot) {
-        window.alert("復元データがありません");
+        showToast("復元データがありません");
         return;
       }
       if (!window.confirm(`「${entry.itemName}」（${entry.storeLabel}）をこの時点の状態に戻しますか？`)) return;
@@ -4299,7 +4299,7 @@
         await addIssue(entry.snapshot);
         await refreshMindmapPanel(currentSelectedProjectId);
       }
-      window.alert(`「${entry.itemName}」を復元しました`);
+      showToast(`「${entry.itemName}」を復元しました`);
       await refreshChangelogPanel(currentSelectedProjectId);
     }
 
