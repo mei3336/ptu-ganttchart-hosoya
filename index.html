@@ -10,6 +10,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- 詳細設計書1.2節「使用ライブラリ（CDN経由・元アプリと同一を踏襲）」の指定バージョンで読み込む。
+       PDF出力（html2canvas/jsPDF）・Excel出力（xlsx-js-style）はこの3本のグローバルオブジェクトに
+       依存する。<head>内で（defer等を付けず）同期的に読み込むことで、DOMContentLoaded時点では
+       必ず読み込みが完了しているか失敗しているかが確定した状態になる
+       （PDF出力側のライブラリ未読込チェックが、読込中の一瞬を誤って「失敗」と判定しないようにするため）。 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
   <style>
     /* ===== デザイントークン（UIデザイン仕様書1章の値をそのまま採用） ===== */
     :root {
@@ -736,6 +744,46 @@
       margin-top: 16px;
     }
 
+    /* M9：データ取込－差分比較モーダル。ストアごとにグループ化した一覧を持つため、
+       通常のモーダル（420px）より広い専用幅にする。:has()で対象を絞り、他モーダルの
+       幅には影響させない。 */
+    .modal-panel:has(.import-diff-list) {
+      width: 640px;
+    }
+
+    .import-diff-list {
+      max-height: 50vh;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      margin-bottom: 8px;
+    }
+
+    .import-diff-store-group + .import-diff-store-group {
+      border-top: 1px solid var(--color-border);
+    }
+
+    .import-diff-store-group h3 {
+      margin: 0;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--color-text-mid);
+      background: var(--color-surface-2);
+    }
+
+    .import-diff-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .import-diff-item:hover {
+      background: var(--color-surface-2);
+    }
+
     .modal-button-primary {
       padding: 6px 14px;
       border-radius: var(--radius-standard);
@@ -971,6 +1019,33 @@
     .changelog-action-badge.is-delete {
       background: var(--color-danger);
     }
+
+    /* ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
+       画面右下に固定表示し、表示時は下からスライドイン、約2.8秒で自動的にスライドアウトして消える。
+       非表示時にdisplay:noneにしないのは、スライドイン/アウトのtransitionを効かせるため
+       （opacity/transformだけを切り替え、要素自体は常にDOMに存在させる）。 */
+    #toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      max-width: 360px;
+      padding: 12px 16px;
+      background: var(--color-text-dark);
+      color: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      font-size: 13px;
+      z-index: 200;
+      opacity: 0;
+      transform: translateY(16px);
+      pointer-events: none;
+      transition: opacity .25s ease, transform .25s ease;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -983,12 +1058,16 @@
       <button id="deleteProjectButton" class="toolbar-button" type="button">🗑 プロジェクト削除</button>
     </div>
     <div class="header-group">
-      <!-- データ取込／データ出力／PDF出力／Excel出力は今回のスコープ外（別工程）。
-           視覚的な再現のみ行い、クリックしても何も起きない旨をhandleOutOfScopeButtonClickで示す。 -->
-      <button class="toolbar-button" type="button" data-out-of-scope-label="データ取込">データ取込</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="データ出力">データ出力</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="PDF出力">PDF出力</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="Excel出力">Excel出力</button>
+      <button id="importDataButton" class="toolbar-button" type="button">データ取込</button>
+      <!-- 取込ファイル選択用の非表示input。importDataButtonのクリックでこちらをクリックさせる
+           （<input type="file">自体をボタンとして見せると装飾の自由度が下がるため）。 -->
+      <input id="importFileInput" type="file" accept="application/json" hidden>
+      <button id="exportDataButton" class="toolbar-button" type="button">データ出力</button>
+      <!-- PDF出力・Excel出力はプロジェクト未選択時は使用不可（基本設計書2.1）。
+           初期のdisabled属性は、プロジェクトが1件も無い場合の初期表示用。実際の有効/無効は
+           switchToProject内のapplyReportButtonAvailabilityが選択状態に応じて切り替える。 -->
+      <button id="exportPdfButton" class="toolbar-button" type="button" disabled>PDF出力</button>
+      <button id="exportExcelButton" class="toolbar-button" type="button" disabled>Excel出力</button>
     </div>
   </header>
 
@@ -1148,6 +1227,10 @@
   <div id="modalOverlay" class="modal-overlay" hidden>
     <div class="modal-panel" id="modalPanel"></div>
   </div>
+
+  <!-- 共通UI部品：トースト通知（UIデザイン仕様書2.4節）。showToast()がtextContentとshowクラスを
+       差し替えるだけの単一の入れ物で、全機能から共通で使い回す。 -->
+  <div id="toast"></div>
 
   <script>
     "use strict";
@@ -1424,6 +1507,18 @@
       return promisifyRequest(store.delete(scheduleId), transaction);
     }
 
+    // 【前提】なし（プロジェクトによる絞り込みを行わない）。
+    // 【処理】schedules ストアの全件を取得する（H1データエクスポート専用。
+    //   既存の getSchedulesByProject はプロジェクト単位の絞り込み用のため、
+    //   全プロジェクト分をまとめるバックアップ出力には使えない。getAllProjects と同じ考え方）。
+    // 【結果】スケジュールの配列を resolve する（0件なら空配列）。
+    async function getAllSchedules() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SCHEDULES, "readonly");
+      const store = transaction.objectStore(STORE_SCHEDULES);
+      return promisifyRequest(store.getAll(), transaction);
+    }
+
     // ===== tasks ストア（カンバン）のCRUD =====
 
     // tasks の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
@@ -1463,6 +1558,16 @@
       const transaction = db.transaction(STORE_TASKS, "readwrite");
       const store = transaction.objectStore(STORE_TASKS);
       return promisifyRequest(store.delete(taskId), transaction);
+    }
+
+    // 【前提】なし（プロジェクトによる絞り込みを行わない）。
+    // 【処理】tasks ストアの全件を取得する（H1データエクスポート専用。getAllSchedules と同じ理由）。
+    // 【結果】タスクの配列を resolve する（0件なら空配列）。
+    async function getAllTasks() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_TASKS, "readonly");
+      const store = transaction.objectStore(STORE_TASKS);
+      return promisifyRequest(store.getAll(), transaction);
     }
 
     // ===== comments ストアのCRUD =====
@@ -1509,6 +1614,17 @@
       const transaction = db.transaction(STORE_COMMENTS, "readwrite");
       const store = transaction.objectStore(STORE_COMMENTS);
       return promisifyRequest(store.delete(commentId), transaction);
+    }
+
+    // 【前提】なし（taskIdによる絞り込みを行わない）。
+    // 【処理】comments ストアの全件を取得する（H1データエクスポート専用。comments は projectId を
+    //   持たないため、プロジェクト単位で束ねる既存の合成処理は使えず、ストア全体を直接取得する）。
+    // 【結果】コメントの配列を resolve する（0件なら空配列）。
+    async function getAllComments() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_COMMENTS, "readonly");
+      const store = transaction.objectStore(STORE_COMMENTS);
+      return promisifyRequest(store.getAll(), transaction);
     }
 
     // ===== changelog ストア（変更履歴）のCRUD =====
@@ -1619,6 +1735,16 @@
       return promisifyRequest(store.delete(issueId), transaction);
     }
 
+    // 【前提】なし（プロジェクトによる絞り込みを行わない）。
+    // 【処理】issues ストアの全件を取得する（H1データエクスポート専用。getAllSchedules と同じ理由）。
+    // 【結果】ノードの配列を resolve する（0件なら空配列）。
+    async function getAllIssues() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_ISSUES, "readonly");
+      const store = transaction.objectStore(STORE_ISSUES);
+      return promisifyRequest(store.getAll(), transaction);
+    }
+
     // ===== memos ストアのCRUD =====
 
     // memos の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
@@ -1658,6 +1784,16 @@
       const transaction = db.transaction(STORE_MEMOS, "readwrite");
       const store = transaction.objectStore(STORE_MEMOS);
       return promisifyRequest(store.delete(memoId), transaction);
+    }
+
+    // 【前提】なし（プロジェクトによる絞り込みを行わない）。
+    // 【処理】memos ストアの全件を取得する（H1データエクスポート専用。getAllSchedules と同じ理由）。
+    // 【結果】メモの配列を resolve する（0件なら空配列）。
+    async function getAllMemos() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_MEMOS, "readonly");
+      const store = transaction.objectStore(STORE_MEMOS);
+      return promisifyRequest(store.getAll(), transaction);
     }
 
     // ===== quickmemos ストア（即時メモ）のCRUD =====
@@ -1729,6 +1865,16 @@
       });
     }
 
+    // 【前提】なし（プロジェクトによる絞り込みを行わない）。
+    // 【処理】quickmemos ストアの全件を取得する（H1データエクスポート専用。getAllSchedules と同じ理由）。
+    // 【結果】即時メモの配列を resolve する（0件なら空配列）。
+    async function getAllQuickMemos() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_QUICKMEMOS, "readonly");
+      const store = transaction.objectStore(STORE_QUICKMEMOS);
+      return promisifyRequest(store.getAll(), transaction);
+    }
+
     // ===== snapshots ストアのCRUD =====
 
     // snapshots の操作対象ストア名・インデックス名。名前の打ち間違いを1箇所に閉じ込める
@@ -1770,6 +1916,16 @@
       const transaction = db.transaction(STORE_SNAPSHOTS, "readwrite");
       const store = transaction.objectStore(STORE_SNAPSHOTS);
       return promisifyRequest(store.delete(snapshotId), transaction);
+    }
+
+    // 【前提】なし（プロジェクトによる絞り込みを行わない）。
+    // 【処理】snapshots ストアの全件を取得する（H1データエクスポート専用。getAllSchedules と同じ理由）。
+    // 【結果】スナップショットの配列を resolve する（0件なら空配列）。
+    async function getAllSnapshots() {
+      const db = await getDB();
+      const transaction = db.transaction(STORE_SNAPSHOTS, "readonly");
+      const store = transaction.objectStore(STORE_SNAPSHOTS);
+      return promisifyRequest(store.getAll(), transaction);
     }
 
     // ===== 複合操作（複数ストアにまたがる処理）の共通ユーティリティ =====
@@ -2000,6 +2156,497 @@
       return idsToDelete;
     }
 
+    // ===== H1：データ出力（JSONエクスポート） =====
+    // 【設計判断】対象は基本設計書9.1に明記された全8ストア（projects/schedules/tasks/issues/
+    //   comments/memos/quickmemos/snapshots）。changelog（変更履歴）はこの一覧に含まれないため
+    //   対象外とする。crud-implementation.mdの1関数1処理の方針により、
+    //   「全ストアを読み切る」「ファイル名を組み立てる」「ダウンロードを実行する」を
+    //   別関数に分け、ボタンのクリックハンドラがこの3つを順に呼ぶだけの構成にする。
+
+    // 【前提】なし。
+    // 【処理】8ストアそれぞれの全件取得関数（getAllXxx）を並行に呼び、1つのオブジェクトにまとめる。
+    //   各getAllXxxは自分専用のトランザクションを持つ独立した読み取りのため、Promise.allで
+    //   並行に走らせても「1つのトランザクション内で他の非同期処理を待つ」ことにはならない
+    //   （switchToProjectの3パネル同時更新と同じ考え方）。
+    // 【結果】{projects, schedules, tasks, issues, comments, memos, quickmemos, snapshots} を resolve する。
+    async function collectAllStoresDataForExport() {
+      const [projects, schedules, tasks, issues, comments, memos, quickmemos, snapshots] = await Promise.all([
+        getAllProjects(),
+        getAllSchedules(),
+        getAllTasks(),
+        getAllIssues(),
+        getAllComments(),
+        getAllMemos(),
+        getAllQuickMemos(),
+        getAllSnapshots(),
+      ]);
+      return { projects, schedules, tasks, issues, comments, memos, quickmemos, snapshots };
+    }
+
+    // 【前提】date はファイル名の日付部分に使うDateオブジェクト。
+    // 【処理】YYYYMMDD形式（区切り無し）でエクスポートファイル名を組み立てる
+    //   （基本設計書9.1：`GanttForge_backup_{YYYYMMDD}.json`）。
+    // 【結果】組み立てたファイル名の文字列を返す。
+    function buildExportBackupFileName(date) {
+      const compactDateString = date.toISOString().slice(0, 10).replaceAll("-", "");
+      return `GanttForge_backup_${compactDateString}.json`;
+    }
+
+    // 【前提】fileName はダウンロードさせたいファイル名。dataObject はJSONへ変換可能なオブジェクト。
+    // 【処理】dataObjectをJSON文字列化してBlob化し、一時的な<a>要素を使ってブラウザにダウンロードさせる。
+    //   Blob URLはダウンロードの合図（click）を出した直後にはもう不要になるため、
+    //   revokeObjectURLでメモリ上のURLマッピングを解放する。
+    // 【結果】ブラウザのダウンロードが実行される（戻り値なし）。
+    function downloadObjectAsJsonFile(fileName, dataObject) {
+      const jsonBlob = new Blob([JSON.stringify(dataObject, null, 2)], { type: "application/json" });
+      const downloadUrl = URL.createObjectURL(jsonBlob);
+      const downloadLinkElement = document.createElement("a");
+      downloadLinkElement.href = downloadUrl;
+      downloadLinkElement.download = fileName;
+      downloadLinkElement.click();
+      URL.revokeObjectURL(downloadUrl);
+    }
+
+    // 【前提】なし。
+    // 【処理】全8ストアを読み切り、ファイル名を組み立ててJSONファイルとしてダウンロードする
+    //   （基本設計書9.1／詳細設計書3.9.1 exportData相当）。
+    // 【結果】ダウンロード実行後、トースト「データをエクスポートしました」を表示する。
+    async function handleExportDataButtonClick() {
+      const allStoresData = await collectAllStoresDataForExport();
+      const fileName = buildExportBackupFileName(new Date());
+      downloadObjectAsJsonFile(fileName, allStoresData);
+      showToast("データをエクスポートしました");
+    }
+
+    // ===== H2：データ取込（JSONインポート＋差分適用） =====
+    // 【設計判断】質問リスト_未確認事項.md Q1〜Q3の決定に従う：
+    //   ・比較・適用対象はH1と同じ全8ストア（changelogは対象外）。
+    //   ・変更履歴（changelog）への記録は既存のLOGGED_STORES（projects/schedules/tasks/issues）
+    //     のみに限定し、comments/memos/quickmemos/snapshotsは記録しない（Q1）。
+    //   ・タスク管理の「変更」ログの差分フィールドはTASK_LOGGED_FIELD_LABELS（Q2）。
+    //   ・削除候補はプロジェクトによる絞り込みを行わず、DB全体で比較する（Q3）。
+    //   ストアごとの分岐をgetBackupStoreDefinitions()の1箇所に集約し、H1のgetAllと揃えることで
+    //   「片方のストアだけ増やし忘れる」事故を防ぐ。この関数を宣言時ではなく呼び出し時に
+    //   評価するのは、PROJECT_LOGGED_FIELD_LABELS等（後方のモーダル節で定義）を参照するため
+    //   （constは宣言前に参照できないが、関数本体の評価は呼び出し時まで遅延されるため問題ない）。
+
+    // 【前提】なし。
+    // 【処理】H1（エクスポート）・H2（インポート）で共通して使う「ストアの取扱い定義」を返す。
+    // 【結果】8ストア分の { key, label, getAll, put, del, nameField, logged, fieldLabels } の配列を返す。
+    function getBackupStoreDefinitions() {
+      return [
+        { key: "projects", label: "プロジェクト", getAll: getAllProjects, put: addProject, del: deleteProject, nameField: "name", logged: true, fieldLabels: PROJECT_LOGGED_FIELD_LABELS },
+        { key: "schedules", label: "スケジュール", getAll: getAllSchedules, put: addSchedule, del: deleteSchedule, nameField: "name", logged: true, fieldLabels: SCHEDULE_LOGGED_FIELD_LABELS },
+        { key: "tasks", label: "タスク", getAll: getAllTasks, put: addTask, del: deleteTask, nameField: "title", logged: true, fieldLabels: TASK_LOGGED_FIELD_LABELS },
+        { key: "issues", label: "マインドマップノード", getAll: getAllIssues, put: addIssue, del: deleteIssue, nameField: "title", logged: true, fieldLabels: ISSUE_LOGGED_FIELD_LABELS },
+        { key: "comments", label: "コメント", getAll: getAllComments, put: addComment, del: deleteComment, nameField: "text", logged: false, fieldLabels: {} },
+        { key: "memos", label: "メモ", getAll: getAllMemos, put: addMemo, del: deleteMemo, nameField: "title", logged: false, fieldLabels: {} },
+        { key: "quickmemos", label: "即時メモ", getAll: getAllQuickMemos, put: addQuickMemo, del: deleteQuickMemo, nameField: "text", logged: false, fieldLabels: {} },
+        { key: "snapshots", label: "スナップショット", getAll: getAllSnapshots, put: addSnapshot, del: deleteSnapshot, nameField: "name", logged: false, fieldLabels: {} },
+      ];
+    }
+
+    // 【前提】parsedData はJSON.parseの結果（型不明の値である可能性がある）。
+    // 【処理】基本設計書9.2の検証：projects・schedulesキーの両方を配列として持つかどうかを判定する。
+    // 【結果】有効な形をしていればtrue、そうでなければfalseを返す。
+    function isValidImportedBackupShape(parsedData) {
+      if (!parsedData || typeof parsedData !== "object") return false;
+      return Array.isArray(parsedData.projects) && Array.isArray(parsedData.schedules);
+    }
+
+    // 【前提】currentRecords・importedRecordsはどちらも id を持つオブジェクトの配列
+    //   （同じストアの、現在のDB内容と取込ファイル内の内容）。
+    // 【処理】idをキーに3種類へ分類する：
+    //   ・add：importedRecordsにあるが currentRecords に無いid
+    //   ・del：currentRecordsにあるが importedRecords に無いid（Q3：プロジェクトによる絞り込み無し）
+    //   ・mod：両方にあり、内容（JSON文字列化して比較）が異なるid
+    //   内容が完全一致するもの（取り込んでも変化が無いもの）はどの分類にも含めない。
+    // 【結果】{ add: [record...], mod: [{before, after}...], del: [record...] } を返す。
+    function computeStoreDiff(currentRecords, importedRecords) {
+      const currentById = new Map(currentRecords.map((record) => [record.id, record]));
+      const importedById = new Map(importedRecords.map((record) => [record.id, record]));
+
+      const add = [];
+      const mod = [];
+      for (const [id, importedRecord] of importedById) {
+        const currentRecord = currentById.get(id);
+        if (!currentRecord) {
+          add.push(importedRecord);
+        } else if (JSON.stringify(currentRecord) !== JSON.stringify(importedRecord)) {
+          mod.push({ before: currentRecord, after: importedRecord });
+        }
+      }
+
+      const del = [];
+      for (const [id, currentRecord] of currentById) {
+        if (!importedById.has(id)) {
+          del.push(currentRecord);
+        }
+      }
+
+      return { add, mod, del };
+    }
+
+    // 【前提】importedAllStoresData はisValidImportedBackupShapeで検証済みの取込データ
+    //   （H1エクスポートと同じ形＝8ストア分の配列を持つオブジェクト）。
+    // 【処理】getBackupStoreDefinitionsの各ストアについて、現在のDB内容（definition.getAll()）と
+    //   取込データをcomputeStoreDiffで比較する。1件も差分が無いストアは結果から除く
+    //   （差分比較モーダルに空のグループを表示しないため）。
+    // 【結果】[{ key, label, nameField, add, mod, del }, ...]（差分のあるストアのみ）を返す。
+    async function buildImportDiff(importedAllStoresData) {
+      const diffByStore = [];
+      for (const definition of getBackupStoreDefinitions()) {
+        const currentRecords = await definition.getAll();
+        const importedRecords = importedAllStoresData[definition.key] || [];
+        const diff = computeStoreDiff(currentRecords, importedRecords);
+        if (diff.add.length > 0 || diff.mod.length > 0 || diff.del.length > 0) {
+          diffByStore.push({ key: definition.key, label: definition.label, nameField: definition.nameField, ...diff });
+        }
+      }
+      return diffByStore;
+    }
+
+    // 【前提】storeKey/action/itemIdはどのレコードかを特定する識別子（action は "add"|"mod"|"del"）。
+    //   displayNameHtmlは表示用に組み立て済みの（エスケープ済み）HTML文字列。
+    // 【処理】1件分のチェックボックス付き行のHTML文字列を組み立てる
+    //   （モーダル・ダイアログ一覧M9：各項目チェックボックス。既定はチェック済み＝全選択状態）。
+    // 【結果】<label>要素のHTML文字列を返す。
+    function renderImportDiffItemToHtml(storeKey, action, itemId, displayNameHtml) {
+      const actionBadgeLabels = { add: "追加", mod: "変更", del: "削除" };
+      const actionBadgeClasses = { add: "is-add", mod: "is-edit", del: "is-delete" };
+      return `<label class="import-diff-item">
+        <input type="checkbox" class="import-diff-checkbox" data-store-key="${storeKey}" data-action="${action}" data-item-id="${escapeHtmlText(String(itemId))}" checked>
+        <span class="changelog-action-badge ${actionBadgeClasses[action]}">${actionBadgeLabels[action]}</span>
+        ${displayNameHtml}
+      </label>`;
+    }
+
+    // 【前提】diffByStoreはbuildImportDiffの戻り値。
+    // 【処理】ストアごとに見出し（件数の内訳）と、add/mod/delそれぞれのチェックボックス付き一覧を
+    //   組み立てる（モーダル・ダイアログ一覧M9：ストアごとにグループ化した変更・削除候補一覧、
+    //   全選択チェックボックス）。modの表示名は、名前フィールドが変わっていれば
+    //   「旧名前 → 新名前」、変わっていなければ新しい方の名前をそのまま表示する。
+    //   差分が1件も無い場合は、その旨を案内するだけのモーダルにする（基本設計書9.2は
+    //   差分が有る前提の記述のため、0件時の表示は本関数内で決める運用上の配慮）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderImportDiffModalToHtml(diffByStore) {
+      if (diffByStore.length === 0) {
+        return `<h2>データ取込－差分比較</h2>
+          <p class="empty-state-message">現在のデータと取込ファイルの間に差分はありません。</p>
+          <div class="modal-actions">
+            <button type="button" class="modal-button-secondary" id="importDiffCancelButton">閉じる</button>
+          </div>`;
+      }
+
+      const storeGroupsHtml = diffByStore
+        .map((storeDiff) => {
+          const addItemsHtml = storeDiff.add
+            .map((record) => renderImportDiffItemToHtml(storeDiff.key, "add", record.id, escapeHtmlText(String(record[storeDiff.nameField] ?? ""))))
+            .join("");
+          const modItemsHtml = storeDiff.mod
+            .map(({ before, after }) => {
+              const beforeName = before[storeDiff.nameField];
+              const afterName = after[storeDiff.nameField];
+              const displayNameHtml = beforeName !== afterName
+                ? `${escapeHtmlText(String(beforeName ?? ""))} → ${escapeHtmlText(String(afterName ?? ""))}`
+                : escapeHtmlText(String(afterName ?? ""));
+              return renderImportDiffItemToHtml(storeDiff.key, "mod", after.id, displayNameHtml);
+            })
+            .join("");
+          const delItemsHtml = storeDiff.del
+            .map((record) => renderImportDiffItemToHtml(storeDiff.key, "del", record.id, escapeHtmlText(String(record[storeDiff.nameField] ?? ""))))
+            .join("");
+          return `<div class="import-diff-store-group">
+            <h3>${escapeHtmlText(storeDiff.label)}（追加${storeDiff.add.length}・変更${storeDiff.mod.length}・削除${storeDiff.del.length}）</h3>
+            ${addItemsHtml}${modItemsHtml}${delItemsHtml}
+          </div>`;
+        })
+        .join("");
+
+      return `<h2>データ取込－差分比較</h2>
+        <div class="modal-field">
+          <label><input type="checkbox" id="importDiffSelectAllCheckbox" checked> 全選択</label>
+        </div>
+        <div class="import-diff-list">${storeGroupsHtml}</div>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="importDiffCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="importDiffApplyButton">選択した変更を適用</button>
+        </div>`;
+    }
+
+    // 【前提】diffByStoreはbuildImportDiffの戻り値。
+    // 【処理】差分比較モーダルを開き、全選択チェックボックス・キャンセル・適用ボタンにイベントを登録する。
+    // 【結果】モーダルが操作可能な状態で表示される。
+    function openImportDiffModal(diffByStore) {
+      openModal(renderImportDiffModalToHtml(diffByStore));
+
+      const cancelButton = document.getElementById("importDiffCancelButton");
+      cancelButton.addEventListener("click", closeModal);
+
+      const selectAllCheckbox = document.getElementById("importDiffSelectAllCheckbox");
+      if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener("change", () => {
+          for (const checkbox of document.querySelectorAll(".import-diff-checkbox")) {
+            checkbox.checked = selectAllCheckbox.checked;
+          }
+        });
+      }
+
+      const applyButton = document.getElementById("importDiffApplyButton");
+      if (applyButton) {
+        applyButton.addEventListener("click", () => handleApplyImportButtonClick(diffByStore));
+      }
+    }
+
+    // 【前提】storeDefinitionはgetBackupStoreDefinitionsの1要素。actionは"add"|"mod"|"del"。
+    //   primaryRecordは適用対象そのもの（add/modは取込データ側のレコード、delは削除対象＝
+    //   現在のDB側のレコード）。beforeRecordForDiffはmod時のみ使う変更前レコード（他はnull）。
+    // 【処理】通常のupsert(put)／削除(del)関数を1件だけ呼ぶ。ストアがLOGGED_STORES対象
+    //   （projects/schedules/tasks/issues）の場合のみ、recordChangelogEntryで変更履歴を記録する
+    //   （質問リスト_未確認事項.md Q1）。projectIdは、projectsストアではレコード自身のidを、
+    //   他ストアではレコードのprojectIdを使う（handleProjectModalSaveButtonClickと同じ扱い）。
+    // 【結果】1件の適用（put/delete、必要なら変更履歴の記録）が完了した時点で resolve する。
+    async function applyOneImportItem(storeDefinition, action, primaryRecord, beforeRecordForDiff) {
+      if (action === "del") {
+        await storeDefinition.del(primaryRecord.id);
+      } else {
+        await storeDefinition.put(primaryRecord);
+      }
+
+      if (!storeDefinition.logged) return;
+
+      const projectId = storeDefinition.key === "projects" ? primaryRecord.id : primaryRecord.projectId;
+      const changelogAction = action === "add" ? "add" : action === "mod" ? "edit" : "delete";
+      await recordChangelogEntry(
+        changelogAction,
+        projectId,
+        storeDefinition.key,
+        storeDefinition.label,
+        primaryRecord.id,
+        primaryRecord[storeDefinition.nameField],
+        beforeRecordForDiff ?? null,
+        primaryRecord,
+        storeDefinition.fieldLabels
+      );
+    }
+
+    // 【前提】diffByStoreは、開いている差分比較モーダルが表示している内容そのもの
+    //   （buildImportDiffの戻り値。チェック状態はモーダルのDOM側が持つ）。
+    // 【処理】チェック済みのチェックボックスを集め、0件ならアラートで案内して終了する
+    //   （詳細設計書3.9.3エラーバリエーション1）。1件以上ならconfirmで最終確認し
+    //   （エラーバリエーション2）、OKならチェック済みの項目だけを1件ずつapplyOneImportItemで適用する。
+    // 【結果】適用後はモーダルを閉じ、プロジェクト一覧・現在の画面を再読込し、
+    //   トースト「取込完了: 新規{n}件 / 変更{n}件 / 削除{n}件」を表示する。
+    async function handleApplyImportButtonClick(diffByStore) {
+      const checkedCheckboxes = Array.from(document.querySelectorAll(".import-diff-checkbox:checked"));
+      if (checkedCheckboxes.length === 0) {
+        window.alert("適用する項目を選択してください");
+        return;
+      }
+      if (!window.confirm(`${checkedCheckboxes.length}件の変更を適用しますか？`)) return;
+
+      const storeDefinitionsByKey = new Map(getBackupStoreDefinitions().map((definition) => [definition.key, definition]));
+      const diffByStoreKey = new Map(diffByStore.map((storeDiff) => [storeDiff.key, storeDiff]));
+
+      let addedCount = 0;
+      let modifiedCount = 0;
+      let deletedCount = 0;
+
+      for (const checkbox of checkedCheckboxes) {
+        const storeDefinition = storeDefinitionsByKey.get(checkbox.dataset.storeKey);
+        const storeDiff = diffByStoreKey.get(checkbox.dataset.storeKey);
+        const itemId = checkbox.dataset.itemId;
+
+        if (checkbox.dataset.action === "add") {
+          const record = storeDiff.add.find((item) => String(item.id) === itemId);
+          await applyOneImportItem(storeDefinition, "add", record, null);
+          addedCount++;
+        } else if (checkbox.dataset.action === "mod") {
+          const pair = storeDiff.mod.find((item) => String(item.after.id) === itemId);
+          await applyOneImportItem(storeDefinition, "mod", pair.after, pair.before);
+          modifiedCount++;
+        } else if (checkbox.dataset.action === "del") {
+          const record = storeDiff.del.find((item) => String(item.id) === itemId);
+          await applyOneImportItem(storeDefinition, "del", record, null);
+          deletedCount++;
+        }
+      }
+
+      closeModal();
+      await refreshProjectSelectDropdown();
+      const remainingProjectList = await getAllProjects();
+      const stillExists = remainingProjectList.some((project) => project.id === currentSelectedProjectId);
+      const nextProjectId = stillExists ? currentSelectedProjectId : (remainingProjectList[0]?.id || null);
+      document.getElementById("projectSelectDropdown").value = nextProjectId || "";
+      await switchToProject(nextProjectId);
+      showToast(`取込完了: 新規${addedCount}件 / 変更${modifiedCount}件 / 削除${deletedCount}件`);
+    }
+
+    // 【前提】fileInputElement は<input type="file">要素で、files[0]に選択されたJSONファイルを持つこと。
+    // 【処理】ファイルをテキストとして読み込みJSON.parseする。パース失敗、または
+    //   projects/schedulesキーが無い場合は「無効なファイルです。GanttForgeのエクスポートファイルを
+    //   選択してください。」をalertで表示しconsole.errorに詳細を出す（基本設計書9.2）。
+    //   検証OKなら現在のDB内容との差分を算出し、差分比較モーダルを開く。
+    //   ファイル選択欄は最後に必ず空にする（<input type="file">は同じファイルを選び直しても
+    //   changeイベントが発火しない仕様のため、次回選択のために毎回リセットする）。
+    // 【結果】検証NG時は何も変更せず終了する。OK時は差分比較モーダルを開く。
+    async function handleImportFileInputChange(fileInputElement) {
+      const selectedFile = fileInputElement.files[0];
+      fileInputElement.value = "";
+      if (!selectedFile) return;
+
+      let importedData;
+      try {
+        const fileText = await selectedFile.text();
+        importedData = JSON.parse(fileText);
+      } catch (error) {
+        console.error(error);
+        window.alert("無効なファイルです。GanttForgeのエクスポートファイルを選択してください。");
+        return;
+      }
+
+      if (!isValidImportedBackupShape(importedData)) {
+        console.error("インポートファイルにprojects/schedulesキーがありません", importedData);
+        window.alert("無効なファイルです。GanttForgeのエクスポートファイルを選択してください。");
+        return;
+      }
+
+      const diffByStore = await buildImportDiff(importedData);
+      openImportDiffModal(diffByStore);
+    }
+
+    // 【前提】projectName はファイル名に使うプロジェクト名（未選択時はnull/undefinedを許容）。
+    //   extension は拡張子（ドット無し。例："pdf"/"xlsx"）。H3・H4で共通のファイル名規則を使う。
+    // 【処理】`GanttForge_{プロジェクト名}_{YYYYMMDD}.{拡張子}` の形でファイル名を組み立てる。
+    //   プロジェクト名が無い場合は「無題」を使う。
+    // 【結果】組み立てたファイル名の文字列を返す。
+    function buildReportFileName(projectName, extension) {
+      const compactDateString = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      return `GanttForge_${projectName || "無題"}_${compactDateString}.${extension}`;
+    }
+
+    // 【前提】date は出力日時にしたいDateオブジェクト。H3(PDF)・H4(Excel)で共通の表記
+    //   （基本設計書9.3・9.4：「出力日時：YYYY/M/D H:mm:ss」）に使う。
+    // 【処理】YYYY/M/D H:mm:ss形式の文字列を組み立てる（月日は0埋めせず、時分秒のみ0埋めする）。
+    // 【結果】組み立てた文字列を返す。
+    function formatDateToOutputTimestampString(date) {
+      const padToTwoDigits = (value) => String(value).padStart(2, "0");
+      return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${padToTwoDigits(date.getHours())}:${padToTwoDigits(date.getMinutes())}:${padToTwoDigits(date.getSeconds())}`;
+    }
+
+    // ===== H3：PDF出力（exportPDF） =====
+    // 【設計判断】crud-implementation.md対象外（DB操作を伴わない）。基本設計書9.3・詳細設計書
+    //   3.10.2に従い、以下の方針で実装する：
+    //   ・キャプチャ対象は#wbsPanel（左：スケジュール一覧）と#ganttPanelBody（右：ガントチャート）。
+    //     #ganttPanelBodyは.gantt-scroll-area（overflow-x:auto）の中身のため、素朴に
+    //     html2canvasへ渡すと画面に見えている範囲だけしかキャプチャされない。html2canvasの
+    //     width/height/windowWidth/windowHeightオプションに要素自身のscrollWidth/scrollHeight
+    //     （スクロール位置に関わらず全内容の実サイズを表す）を明示することで、スクロールで隠れて
+    //     いる最終日までの全体を1枚の画像として取得する（「最終日ギリギリに収まる可変サイズ」の
+    //     実装方法）。
+    //   ・タイトル・出力日時は、DOMへの一時挿入ではなくCanvas 2Dコンテキストで直接描画する
+    //     （キャプチャ後の画像に上乗せする方が、一時的なDOM変更を必要とせず確実なため）。
+    //   ・PDFのページサイズは、この合成後Canvasのピクセルサイズにそのまま合わせる
+    //     （unit:"px"のカスタムformatを使う。A4等の固定サイズは使わない）。
+
+    // 詳細設計書3.10.2：「PDF生成中...」表示後、50ms待機してからキャプチャ処理へ進む。
+    const PDF_CAPTURE_START_DELAY_MS = 50;
+
+    // 合成後Canvas上部に確保する、タイトル・出力日時を描くヘッダー帯の高さ（ピクセル）。
+    const PDF_HEADER_HEIGHT_PX = 60;
+
+    // 【前提】なし。
+    // 【処理】html2canvas・jsPDFのグローバルオブジェクトが両方読み込まれているかを判定する
+    //   （詳細設計書3.10.2）。
+    // 【結果】両方読み込まれていればtrue、そうでなければfalseを返す。
+    function arePdfLibrariesLoaded() {
+      return typeof window.html2canvas !== "undefined" && typeof window.jspdf !== "undefined" && typeof window.jspdf.jsPDF !== "undefined";
+    }
+
+    // 【前提】targetElement はキャプチャしたいDOM要素。overflow-x:autoな親を持つ場合でも、
+    //   要素自身のscrollWidth/scrollHeightは（親のスクロール位置に関わらず）全内容の実サイズを表す。
+    // 【処理】html2canvasに、要素の実サイズ（scrollWidth/scrollHeight）をwidth/height/
+    //   windowWidth/windowHeightとして明示的に渡し、画面に見えている範囲だけでなく全内容を
+    //   キャプチャさせる。
+    // 【結果】キャプチャ結果のCanvas要素を resolve する。
+    function captureElementFullContentToCanvas(targetElement) {
+      return window.html2canvas(targetElement, {
+        width: targetElement.scrollWidth,
+        height: targetElement.scrollHeight,
+        windowWidth: targetElement.scrollWidth,
+        windowHeight: targetElement.scrollHeight,
+      });
+    }
+
+    // 【前提】wbsCanvas・ganttCanvasはそれぞれcaptureElementFullContentToCanvasで取得したCanvas。
+    //   titleText・timestampTextはヘッダー帯に描く文字列。
+    // 【処理】上部にタイトル・出力日時を描くヘッダー帯を確保した1枚のCanvasを新規に作り、
+    //   その下にwbsCanvasを左、ganttCanvasを右に並べて描画する（基本設計書9.3：
+    //   「左側：スケジュール一覧／右側：ガントチャート」「右上に出力日時等の情報欄」）。
+    // 【結果】合成済みのCanvas要素を返す。
+    function composeGanttPdfCanvas(wbsCanvas, ganttCanvas, titleText, timestampText) {
+      const composedCanvas = document.createElement("canvas");
+      composedCanvas.width = wbsCanvas.width + ganttCanvas.width;
+      composedCanvas.height = PDF_HEADER_HEIGHT_PX + Math.max(wbsCanvas.height, ganttCanvas.height);
+
+      const context = composedCanvas.getContext("2d");
+      context.fillStyle = "#FFFFFF";
+      context.fillRect(0, 0, composedCanvas.width, composedCanvas.height);
+
+      context.fillStyle = "#111827";
+      context.font = "bold 24px sans-serif";
+      context.textBaseline = "middle";
+      context.fillText(titleText, 16, PDF_HEADER_HEIGHT_PX / 2);
+
+      context.font = "14px sans-serif";
+      context.textAlign = "right";
+      context.fillText(timestampText, composedCanvas.width - 16, PDF_HEADER_HEIGHT_PX / 2);
+      context.textAlign = "left";
+
+      context.drawImage(wbsCanvas, 0, PDF_HEADER_HEIGHT_PX);
+      context.drawImage(ganttCanvas, wbsCanvas.width, PDF_HEADER_HEIGHT_PX);
+
+      return composedCanvas;
+    }
+
+    // 【前提】なし（currentSelectedProjectId・currentProjectObjectが選択済みであること。
+    //   未選択時はexportPdfButton自体がdisabledのため、この関数は呼ばれない想定）。
+    // 【処理】ライブラリの読込確認→トースト表示→50ms待機→WBS+ガントをキャプチャ→合成→
+    //   カスタムページサイズのPDFを生成→ダウンロードする（詳細設計書3.10.2）。
+    // 【結果】成功時はトースト「PDFを保存しました」、ライブラリ未読込時は
+    //   「PDFライブラリの読み込みに失敗しました。」、生成中の例外時は「PDF生成に失敗しました」
+    //   （console.errorにも詳細を出す）を表示する。
+    async function exportPDF() {
+      if (!arePdfLibrariesLoaded()) {
+        showToast("PDFライブラリの読み込みに失敗しました。");
+        return;
+      }
+
+      showToast("PDF生成中...");
+      await new Promise((resolve) => setTimeout(resolve, PDF_CAPTURE_START_DELAY_MS));
+
+      try {
+        const wbsCanvas = await captureElementFullContentToCanvas(document.getElementById("wbsPanel"));
+        const ganttCanvas = await captureElementFullContentToCanvas(document.getElementById("ganttPanelBody"));
+        const titleText = `${currentProjectObject?.name || ""} — ガントチャート`;
+        const timestampText = `出力日時：${formatDateToOutputTimestampString(new Date())}`;
+        const composedCanvas = composeGanttPdfCanvas(wbsCanvas, ganttCanvas, titleText, timestampText);
+
+        const pdfDocument = new window.jspdf.jsPDF({
+          orientation: composedCanvas.width >= composedCanvas.height ? "landscape" : "portrait",
+          unit: "px",
+          format: [composedCanvas.width, composedCanvas.height],
+        });
+        pdfDocument.addImage(composedCanvas, "PNG", 0, 0, composedCanvas.width, composedCanvas.height);
+        pdfDocument.save(buildReportFileName(currentProjectObject?.name, "pdf"));
+
+        showToast("PDFを保存しました");
+      } catch (error) {
+        console.error(error);
+        showToast("PDF生成に失敗しました");
+      }
+    }
+
     // ===== UI：状態・純粋関数（DOM非依存） =====
     // 【設計判断】このセクションの関数は「データ配列を受け取り、データ/文字列を返す」だけの
     //   純粋関数と、実際にDOMへ反映する薄い関数に分ける。前者はdocumentに一切触れないため、
@@ -2215,6 +2862,198 @@
       const targetTimestamp = parseDateStringToUtcTimestamp(targetDateString);
       const startTimestamp = parseDateStringToUtcTimestamp(timelineStartDateString);
       return Math.round((targetTimestamp - startTimestamp) / MILLISECONDS_PER_DAY);
+    }
+
+    // ===== H4：Excel出力（exportExcel） =====
+    // 【設計判断】crud-implementation.md対象外（DB操作を伴わない）。基本設計書9.4・詳細設計書
+    //   3.10.1に従う。日付列・サマリーの期間はいずれもプロジェクト自体のstartDate/endDateを
+    //   根拠にする（質問リスト_未確認事項.md Q4：配下スケジュールの実効範囲は使わない。
+    //   シート1とシート2で期間の基準が食い違わないよう、両シートともプロジェクト期間で統一する）。
+    //   「日付列は稼働している日にセルの色が付く」（基本設計書9.4、推測との注記あり）は、
+    //   そのスケジュール自身のcolorフィールド（ガントバーの色と同じ値）でセルを塗ることで再現する。
+    //   【H3との非対称について】PDF出力（exportPDF）にはhtml2canvas/jsPDFの読込確認があるが、
+    //   この関数にはxlsx-js-styleの読込確認を意図的に追加しない（基本設計書1.3の既知の非整合
+    //   事項と同じ扱い。詳細設計書3.10.1：元アプリの実装漏れと推測される非対称をそのまま再現する）。
+
+    // シート1固定列（No/WBS/スケジュール/階層/開始日/終了日/期間/担当者/ステータス）の見出し。
+    // 日付列（1日1列）はこの9列の右側に続く（基本設計書9.4）。
+    const EXCEL_FIXED_COLUMN_HEADERS = ["No", "WBS", "スケジュール", "階層", "開始日", "終了日", "期間", "担当者", "ステータス"];
+    const EXCEL_FIXED_COLUMN_COUNT = EXCEL_FIXED_COLUMN_HEADERS.length;
+
+    // depthLevel（0:親, 1:子, 2:孫）を基本設計書9.4の表記「親」「子」等に変換する対応表。
+    const EXCEL_SCHEDULE_DEPTH_LABELS = ["親", "子", "孫"];
+
+    const EXCEL_THIN_BORDER_ALL_SIDES = {
+      top: { style: "thin", color: { rgb: "D1D5DB" } },
+      bottom: { style: "thin", color: { rgb: "D1D5DB" } },
+      left: { style: "thin", color: { rgb: "D1D5DB" } },
+      right: { style: "thin", color: { rgb: "D1D5DB" } },
+    };
+    const EXCEL_TITLE_STYLE = { font: { bold: true, sz: 14 } };
+    const EXCEL_MONTH_HEADER_STYLE = { font: { bold: true, sz: 11 }, fill: { fgColor: { rgb: "E5E7EB" } }, alignment: { horizontal: "center" } };
+    const EXCEL_HEADER_STYLE = { font: { bold: true, sz: 10 }, fill: { fgColor: { rgb: "F3F4F6" } }, alignment: { horizontal: "center" }, border: EXCEL_THIN_BORDER_ALL_SIDES };
+    const EXCEL_BODY_STYLE = { font: { sz: 10 }, border: EXCEL_THIN_BORDER_ALL_SIDES };
+
+    // 【前提】scheduleTreeRows は currentScheduleTreeRows（buildScheduleTreeRowsの戻り値）。
+    // 【処理】Excel出力に必要な列（No・WBS番号・階層ラベル・期間(日数)）を1行ずつ付与する。
+    // 【結果】[{no, wbsNumber, schedule, depthLevel, depthLabel, durationDays}, ...]（表示順は
+    //   ツリーの深さ優先順のまま）を返す。
+    function flattenScheduleTreeRowsForExcel(scheduleTreeRows) {
+      const wbsNumberByScheduleId = calculateWbsNumbers(scheduleTreeRows);
+      return scheduleTreeRows.map((row, index) => {
+        const durationDays = Math.round(
+          (parseDateStringToUtcTimestamp(row.schedule.endDate) - parseDateStringToUtcTimestamp(row.schedule.startDate)) / MILLISECONDS_PER_DAY
+        ) + 1;
+        return {
+          no: index + 1,
+          wbsNumber: wbsNumberByScheduleId.get(row.schedule.id),
+          schedule: row.schedule,
+          depthLevel: row.depthLevel,
+          depthLabel: EXCEL_SCHEDULE_DEPTH_LABELS[row.depthLevel] || "孫",
+          durationDays,
+        };
+      });
+    }
+
+    // 【前提】timelineDaysはbuildGanttTimelineDaysの戻り値（日付順で連続している）。
+    // 【処理】連続する同一年月の日を1つのグループにまとめる（基本設計書9.4：1行目の
+    //   月単位見出し・結合セル）。
+    // 【結果】[{yearMonthLabel, startDayIndex, dayCount}, ...]（startDayIndexはtimelineDays内の
+    //   0始まりの位置）を返す。
+    function calculateExcelMonthGroups(timelineDays) {
+      const monthGroups = [];
+      timelineDays.forEach((day, dayIndex) => {
+        const yearMonthLabel = `${day.year}年${day.month}月`;
+        const lastGroup = monthGroups[monthGroups.length - 1];
+        if (lastGroup && lastGroup.yearMonthLabel === yearMonthLabel) {
+          lastGroup.dayCount++;
+        } else {
+          monthGroups.push({ yearMonthLabel, startDayIndex: dayIndex, dayCount: 1 });
+        }
+      });
+      return monthGroups;
+    }
+
+    // 【前提】hexColorWithHash は"#RRGGBB"形式の文字列（スケジュールのcolorフィールド）。
+    //   値が無い場合はガントバーの既定色（SCHEDULE_BAR_COLOR_PALETTEの先頭色）を使う。
+    // 【処理】先頭の"#"を取り除く（xlsx-js-styleのfill.fgColor.rgbは"#"無しの6桁表記を
+    //   期待するため）。
+    // 【結果】"#"無しの6桁16進数文字列を返す。
+    function stripHashFromHexColor(hexColorWithHash) {
+      return (hexColorWithHash || SCHEDULE_BAR_COLOR_PALETTE[0]).replace("#", "").toUpperCase();
+    }
+
+    // 【前提】project は出力対象プロジェクト。flattenedRowsはflattenScheduleTreeRowsForExcelの
+    //   戻り値。timelineDaysはproject.startDate〜endDateの全日（buildGanttTimelineDaysの戻り値）。
+    //   generatedAtは出力日時にするDateオブジェクト。
+    // 【処理】基本設計書9.4の構成（1行目：タイトル＋月見出し、2行目：列見出し、3行目以降：
+    //   スケジュール行、その後：合計行、末尾：出力日時）でシート1のワークシートを組み立てる。
+    //   日付列は、そのスケジュールの稼働期間に含まれる日だけ、schedule.colorでセルを塗る。
+    // 【結果】xlsx-js-styleのワークシートオブジェクトを返す。
+    function buildGanttSheet(project, flattenedRows, timelineDays, generatedAt) {
+      const monthGroups = calculateExcelMonthGroups(timelineDays);
+      const totalColumnCount = EXCEL_FIXED_COLUMN_COUNT + timelineDays.length;
+      const worksheet = {};
+      const merges = [];
+
+      const setCell = (rowIndex, colIndex, value, style) => {
+        const cellRef = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+        worksheet[cellRef] = { v: value, t: typeof value === "number" ? "n" : "s", s: style };
+      };
+
+      setCell(0, 0, `${project.name} — ガントチャート`, EXCEL_TITLE_STYLE);
+      merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: EXCEL_FIXED_COLUMN_COUNT - 1 } });
+      for (const monthGroup of monthGroups) {
+        const startColumnIndex = EXCEL_FIXED_COLUMN_COUNT + monthGroup.startDayIndex;
+        const endColumnIndex = startColumnIndex + monthGroup.dayCount - 1;
+        setCell(0, startColumnIndex, monthGroup.yearMonthLabel, EXCEL_MONTH_HEADER_STYLE);
+        if (endColumnIndex > startColumnIndex) {
+          merges.push({ s: { r: 0, c: startColumnIndex }, e: { r: 0, c: endColumnIndex } });
+        }
+      }
+
+      EXCEL_FIXED_COLUMN_HEADERS.forEach((header, columnIndex) => setCell(1, columnIndex, header, EXCEL_HEADER_STYLE));
+      timelineDays.forEach((day, dayIndex) => setCell(1, EXCEL_FIXED_COLUMN_COUNT + dayIndex, day.dayOfMonth, EXCEL_HEADER_STYLE));
+
+      flattenedRows.forEach((row, rowOffset) => {
+        const rowIndex = 2 + rowOffset;
+        setCell(rowIndex, 0, row.no, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 1, row.wbsNumber, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 2, row.schedule.name, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 3, row.depthLabel, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 4, row.schedule.startDate, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 5, row.schedule.endDate, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 6, row.durationDays, EXCEL_BODY_STYLE);
+        setCell(rowIndex, 7, row.schedule.assignee || "", EXCEL_BODY_STYLE);
+        setCell(rowIndex, 8, SCHEDULE_STATUS_LABELS[row.schedule.taskStatus] || row.schedule.taskStatus, EXCEL_BODY_STYLE);
+
+        const activeDayFillStyle = { fill: { fgColor: { rgb: stripHashFromHexColor(row.schedule.color) } } };
+        timelineDays.forEach((day, dayIndex) => {
+          const dayDateString = `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.dayOfMonth).padStart(2, "0")}`;
+          const isActiveDay = dayDateString >= row.schedule.startDate && dayDateString <= row.schedule.endDate;
+          if (isActiveDay) {
+            setCell(rowIndex, EXCEL_FIXED_COLUMN_COUNT + dayIndex, "", activeDayFillStyle);
+          }
+        });
+      });
+
+      const totalRowIndex = 2 + flattenedRows.length;
+      const rootDurationTotal = flattenedRows.filter((row) => row.depthLevel === 0).reduce((sum, row) => sum + row.durationDays, 0);
+      setCell(totalRowIndex, 0, "合計（ルート期間合計）", EXCEL_BODY_STYLE);
+      setCell(totalRowIndex, 6, rootDurationTotal, EXCEL_BODY_STYLE);
+      merges.push({ s: { r: totalRowIndex, c: 0 }, e: { r: totalRowIndex, c: 5 } });
+
+      const timestampRowIndex = totalRowIndex + 1;
+      setCell(timestampRowIndex, 0, `出力日時：${formatDateToOutputTimestampString(generatedAt)}`, EXCEL_BODY_STYLE);
+
+      worksheet["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: timestampRowIndex, c: totalColumnCount - 1 } });
+      worksheet["!merges"] = merges;
+      worksheet["!cols"] = EXCEL_FIXED_COLUMN_HEADERS.map(() => ({ wch: 12 })).concat(timelineDays.map(() => ({ wch: 3 })));
+      return worksheet;
+    }
+
+    // 【前提】projectは出力対象プロジェクト。flattenedRowsはflattenScheduleTreeRowsForExcelの
+    //   戻り値（総タスク数の算出に使う。基本設計書1.2用語対応表：元アプリの「タスク」＝本アプリの
+    //   「スケジュール」）。generatedAtは出力日時にするDateオブジェクト。
+    // 【処理】プロジェクト名・開始日・終了日・表示期間・総タスク数・出力日時を並べた
+    //   シート2のワークシートを組み立てる（基本設計書9.4。質問リスト_未確認事項.md Q4：
+    //   終了日・表示期間はプロジェクト自体のstartDate/endDateを根拠にする）。
+    // 【結果】xlsx-js-styleのワークシートオブジェクトを返す。
+    function buildSummarySheet(project, flattenedRows, generatedAt) {
+      const displayDurationDays = Math.round(
+        (parseDateStringToUtcTimestamp(project.endDate) - parseDateStringToUtcTimestamp(project.startDate)) / MILLISECONDS_PER_DAY
+      ) + 1;
+      const summaryRows = [
+        ["プロジェクト名", project.name],
+        ["開始日", project.startDate],
+        ["終了日", project.endDate],
+        ["表示期間", `${displayDurationDays}日`],
+        ["総タスク数", `${flattenedRows.length}件`],
+        [],
+        [`出力日時：${formatDateToOutputTimestampString(generatedAt)}`],
+      ];
+      const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
+      worksheet["!cols"] = [{ wch: 14 }, { wch: 30 }];
+      return worksheet;
+    }
+
+    // 【前提】currentProjectObjectが選択済みであること（未選択時はexportExcelButton自体が
+    //   disabledのため、この関数は呼ばれない想定）。
+    // 【処理】現在のスケジュール一覧をフラット化し、シート1（ガントチャート）・シート2（サマリー）の
+    //   2シート構成のワークブックを作ってダウンロードする（詳細設計書3.10.1 exportExcel相当）。
+    // 【結果】完了後、トースト「Excelファイルを保存しました」を表示する。
+    async function exportExcel() {
+      const project = currentProjectObject;
+      const flattenedRows = flattenScheduleTreeRowsForExcel(currentScheduleTreeRows);
+      const timelineDays = buildGanttTimelineDays(project.startDate, project.endDate);
+      const generatedAt = new Date();
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, buildGanttSheet(project, flattenedRows, timelineDays, generatedAt), "ガントチャート");
+      XLSX.utils.book_append_sheet(workbook, buildSummarySheet(project, flattenedRows, generatedAt), "サマリー");
+      XLSX.writeFile(workbook, buildReportFileName(project.name, "xlsx"));
+
+      showToast("Excelファイルを保存しました");
     }
 
     // 【前提】timelineDays は buildGanttTimelineDays の戻り値。timelineStartDateString は
@@ -2793,6 +3632,15 @@
       document.getElementById("addScheduleButton").disabled = isLocked;
       document.getElementById("lockToggleButton").classList.toggle("is-active", isLocked);
       document.getElementById("deleteProjectButton").hidden = isLocked;
+    }
+
+    // 【前提】hasSelectedProject は現在プロジェクトが選択されているか。
+    // 【処理】PDF出力・Excel出力ボタンのdisabledを切り替える（基本設計書2.1：
+    //   「PDF出力・Excel出力：プロジェクト未選択時は使用不可（活性制御が必要）」）。
+    // 【結果】選択されていればdisabledを外し、されていなければdisabledにする。
+    function applyReportButtonAvailability(hasSelectedProject) {
+      document.getElementById("exportPdfButton").disabled = !hasSelectedProject;
+      document.getElementById("exportExcelButton").disabled = !hasSelectedProject;
     }
 
     // ===== UI：統括（データ取得→純粋関数→DOM反映のつなぎ） =====
@@ -3479,6 +4327,7 @@
         currentProjectObject = null;
       }
       applyLockState(Boolean(currentProjectObject?.locked));
+      applyReportButtonAvailability(Boolean(currentSelectedProjectId));
       await Promise.all([
         refreshGanttPanel(currentSelectedProjectId),
         refreshKanbanPanel(currentSelectedProjectId),
@@ -3499,6 +4348,33 @@
     // 【結果】パネルが閉じる。
     function closeSlidePanel(panelId) {
       document.getElementById(panelId).classList.remove("is-open");
+    }
+
+    // ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
+
+    // トーストを消すタイマーのID。連続してshowToastを呼んだとき、前回のタイマーを
+    // clearTimeoutでリセットし「最後の呼び出しから一定時間後に消える」を保証するために保持する
+    // （初期値null＝まだ一度も表示していない）。
+    let toastHideTimeoutId = null;
+
+    // トーストが表示され続ける時間（ミリ秒）。UIデザイン仕様書2.4節「約2.8秒で自動的に消える」。
+    const TOAST_VISIBLE_DURATION_MS = 2800;
+
+    // 【前提】message は画面右下に表示したい通知文。
+    // 【処理】#toast要素にmessageを差し込み、showクラスを付けてCSSトランジションで表示する。
+    //   すでに表示中のトーストがある場合は、そのタイマーをclearTimeoutで打ち切ってから
+    //   新しいタイマーを仕掛け直す（連続呼び出し時に、古いタイマーで消えてしまわないようにするため）。
+    // 【結果】TOAST_VISIBLE_DURATION_MS後にshowクラスが外れ、トーストが消える（戻り値なし）。
+    function showToast(message) {
+      const toastElement = document.getElementById("toast");
+      toastElement.textContent = message;
+      toastElement.classList.add("show");
+      if (toastHideTimeoutId !== null) {
+        clearTimeout(toastHideTimeoutId);
+      }
+      toastHideTimeoutId = setTimeout(() => {
+        toastElement.classList.remove("show");
+      }, TOAST_VISIBLE_DURATION_MS);
     }
 
     // ===== UI：モーダル（モーダル・ダイアログ一覧①：中央モーダル） =====
@@ -3526,14 +4402,16 @@
 
     // 【前提】project はnull（新規作成モード）、または既存プロジェクトオブジェクト（編集モード）。
     // 【処理】M1/M2共通のプロジェクトモーダルのHTML文字列を組み立てる（DOMには触れない）。
-    //   新規作成時は開始日・終了日の既定値を今日にする（モーダル・ダイアログ一覧M1）。
+    //   新規作成時は開始日・終了日の既定値を今日,1年後にする（モーダル・ダイアログ一覧M1）。
     // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
     function renderProjectModalToHtml(project) {
       const isEditMode = Boolean(project);
       const todayDateString = new Date().toISOString().slice(0, 10);
+      const oneYearLaterDate = new Date();
+            oneYearLaterDate.setFullYear(oneYearLaterDate.getFullYear() + 1);
       const nameValue = isEditMode ? project.name : "";
       const startDateValue = isEditMode ? project.startDate : todayDateString;
-      const endDateValue = isEditMode ? project.endDate : todayDateString;
+      const endDateValue = isEditMode ? project.endDate : oneYearLaterDate;
       return `
         <h2>${isEditMode ? "プロジェクト編集" : "新規プロジェクト作成"}</h2>
         <div class="modal-field">
@@ -4147,6 +5025,17 @@
     // 【設計判断】issuesの追加は今回スコープの手前でprompt()ベースの最小限のまま据え置く
     //   （マインドマップのスライドパネル化自体を今回は見送っているため）。
 
+    // 変更履歴（changelog）に記録するタスク管理(tasks)の対象フィールド。
+    // 既存のタスク編集モーダル（handleTaskModalSaveButtonClick）自体は変更履歴を記録していないため、
+    // 使用箇所は現時点でH2データ取込（差分適用の「変更」ログ）のみ。
+    const TASK_LOGGED_FIELD_LABELS = {
+      title: "タスク名",
+      status: "ステータス",
+      priority: "優先度",
+      dueDate: "期日",
+      description: "メモ",
+    };
+
     // 【前提】formElement は「.kanban-add-form」要素（data-column-status属性でstatus値を持つ）。
     // 【処理】埋め込みフォームの入力値を読み取り、タスク名が空でなければaddTaskで保存する
     //   （モーダル・ダイアログ一覧P1：モーダルを介さずその場で追加）。
@@ -4629,6 +5518,15 @@
         switchToProject(event.target.value || null);
       });
       document.getElementById("createProjectButton").addEventListener("click", handleCreateProjectButtonClick);
+      document.getElementById("exportDataButton").addEventListener("click", handleExportDataButtonClick);
+      document.getElementById("importDataButton").addEventListener("click", () => {
+        document.getElementById("importFileInput").click();
+      });
+      document.getElementById("importFileInput").addEventListener("change", (event) => {
+        handleImportFileInputChange(event.target);
+      });
+      document.getElementById("exportPdfButton").addEventListener("click", exportPDF);
+      document.getElementById("exportExcelButton").addEventListener("click", exportExcel);
       document.getElementById("deleteProjectButton").addEventListener("click", handleDeleteProjectButtonClick);
       document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
