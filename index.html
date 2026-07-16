@@ -126,8 +126,8 @@
 
     .app-logo {
       font-weight: 700;
-      color: var(--color-accent);
-      font-size: 15px;
+      color: var(--color-primary-navy);
+      font-size: 13px;
       margin-right: 4px;
     }
 
@@ -241,7 +241,7 @@
       align-items: center;
       gap: 8px;
       padding: 0 8px;
-      border-bottom: 1px solid var(--color-border);
+      border-bottom: 1.5px solid var(--color-border);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -384,12 +384,12 @@
     }
 
     .gantt-day-column-header.is-saturday {
-      background: rgba(37, 99, 235, .08);
+      background: rgba(37, 99, 235, .09);
       color: var(--color-accent);
     }
 
     .gantt-day-column-header.is-sunday {
-      background: rgba(220, 38, 38, .08);
+      background: rgba(220, 38, 38, .09);
       color: var(--color-danger);
     }
 
@@ -402,7 +402,7 @@
       left: 0;
       right: 0;
       height: var(--gantt-row-height);
-      border-bottom: 1px solid var(--color-border);
+      border-bottom: 1.5px solid var(--color-border);
     }
 
     .gantt-row-background.is-even-row {
@@ -448,7 +448,8 @@
     }
 
     .gantt-bar.is-parent-bar {
-      border-radius: 8px;
+      border-radius: 5px;
+      height: 24px;
     }
 
     /* 詳細設計書3.2.4：掴み手は常時表示ではなく、バーにマウスを乗せた時のみうっすら色が付く。
@@ -497,7 +498,7 @@
       top: 0;
       bottom: 0;
       width: 2px;
-      background: var(--color-danger);
+      background: var(--color-accent);
       z-index: 1;
     }
 
@@ -506,7 +507,7 @@
       top: 6px;
       width: var(--milestone-marker-height);
       height: var(--milestone-marker-height);
-      background: var(--color-danger);
+      background: var(#D97706);
       transform: translateX(-10px) rotate(45deg);
       border-radius: 2px;
     }
@@ -543,7 +544,7 @@
     .kanban-card {
       background: var(--color-white);
       border: 1px solid var(--color-border);
-      border-radius: var(--radius-standard);
+      border-radius: 6px;
       box-shadow: var(--shadow-small);
       padding: 8px;
       margin-bottom: 8px;
@@ -580,8 +581,8 @@
 
     .mindmap-node {
       position: absolute;
-      padding: 6px 12px;
-      border-radius: 16px;
+      padding: 5px 16px;
+      border-radius: 20px;
       color: var(--color-white);
       font-size: 12px;
       white-space: nowrap;
@@ -719,12 +720,22 @@
     .modal-field input[type="date"],
     .modal-field select,
     .modal-field textarea {
-      padding: 6px 8px;
-      border: 1px solid var(--color-border-dark);
+      padding: 9px 12px;
+      border: 1.5px solid var(--color-border-dark);
       border-radius: var(--radius-standard);
       font-family: inherit;
       font-size: 13px;
     }
+
+    .modal-field input[type="text"]:focus,
+    .modal-field input[type="date"]:focus,
+    .modal-field select:focus,
+    .modal-field textarea:focus {
+        outline: none;
+        border-color: var(--color-accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .1);
+    }
+
 
     .modal-color-palette {
       display: flex;
@@ -973,8 +984,8 @@
 
     .quick-memo-input-area textarea {
       flex: 1;
-      padding: 6px 8px;
-      border: 1px solid var(--color-border-dark);
+      padding: 9px 12px;
+      border: 1.5px solid var(--color-border-dark);
       border-radius: var(--radius-standard);
       font-family: inherit;
       font-size: 13px;
@@ -1013,8 +1024,8 @@
     }
 
     .memo-editor-column input[type="text"] {
-      padding: 6px 8px;
-      border: 1px solid var(--color-border-dark);
+      padding: 9px 12px;
+      border: 1.5px solid var(--color-border-dark);
       border-radius: var(--radius-standard);
       font-family: inherit;
       font-size: 14px;
