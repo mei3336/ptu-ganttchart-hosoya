@@ -61,12 +61,26 @@
       box-sizing: border-box;
     }
 
+    /* 対応表No.41：WBSパネルとガント本体を独立してスクロールさせるため、bodyを縦方向の
+       flexコンテナにし、<main>に残りの高さをすべて割り当てる（#lockBandの表示/非表示で
+       ヘッダー群の高さが変わっても、計算式に書き起こさず自動的に追従させるため）。
+       固定配置（position:fixed）のモーダル・トースト・スライドパネル等はbodyの表示方式に
+       影響されないため、このレイアウト変更の影響を受けない。 */
     body {
       margin: 0;
       background: var(--color-bg-page);
       color: var(--color-text-dark);
       font-family: 'DM Sans', -apple-system, "Segoe UI", "Hiragino Sans", sans-serif;
       font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    main {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
     }
 
     button {
@@ -204,6 +218,7 @@
     .main-workspace {
       display: flex;
       align-items: flex-start;
+      height: 100%;
     }
 
     .wbs-panel {
@@ -211,9 +226,17 @@
       flex: 0 0 var(--wbs-panel-width);
       background: var(--color-white);
       border-right: 1px solid var(--color-border);
+      height: 100%;
+      overflow-y: auto;
     }
 
+    /* 対応表No.41：見出し行を.wbs-panel（スクロールコンテナ）の上端に固定する。
+       position:stickyはスクロール中もtop:0の位置に留まり続け、行本体だけが下を
+       通り抜けるようにスクロールする（お手本のwbsBody相当：見出し固定・本体スクロール）。 */
     .wbs-header-row {
+      position: sticky;
+      top: 0;
+      z-index: 5;
       height: var(--timeline-header-height);
       display: flex;
       align-items: flex-end;
@@ -347,12 +370,20 @@
     .gantt-scroll-area {
       flex: 1;
       overflow-x: auto;
+      overflow-y: auto;
+      height: 100%;
       background: var(--color-white);
     }
 
+    /* 対応表No.41：見出し行（月・日の目盛り）は縦スクロールに追従させず.gantt-scroll-area
+       （スクロールコンテナ）の上端に固定する。横スクロールは.gantt-scroll-area自体が
+       ヘッダー・本体をまとめて動かすため、この見出しはposition:stickyでも横方向には
+       ついていく（stickyは指定した軸だけ固定し、他の軸はコンテナと一緒に動く）。 */
     .gantt-timeline-header {
       height: var(--timeline-header-height);
-      position: relative;
+      position: sticky;
+      top: 0;
+      z-index: 5;
       border-bottom: 1px solid var(--color-border);
       background: var(--color-surface-2);
     }
@@ -6189,6 +6220,40 @@
       document.querySelector(".gantt-scroll-area").scrollLeft = Math.max(dayOffset * pixelsPerDay - 100, 0);
     }
 
+    // ===== WBSパネルとガント本体の縦スクロール同期（対応表No.41） =====
+    // 【設計判断】#wbsPanelと.gantt-scroll-areaは、それぞれ独立したoverflow-y:autoの
+    //   スクロールコンテナ（CSS側でheight:100%＋overflow-y:autoを付与済み）。片方をscrollTopで
+    //   追従させると、その操作自体がscrollイベントを発火させ、もう片方が今度は最初の要素を
+    //   追従させようとして…と無限に呼び合う恐れがある。isSyncingVerticalScrollという
+    //   同期中フラグを1つ持ち、「自分がスクロールを起こした側の処理中である間は、相手からの
+    //   scrollイベントを無視する」ことでこの無限ループを防ぐ。
+    let isSyncingVerticalScroll = false;
+
+    // 【前提】WBSパネルのscrollイベントから呼ばれる。
+    // 【処理】isSyncingVerticalScrollが立っていれば何もしない（ガント側の同期処理が今まさに
+    //   WBSパネルのscrollTopを書き換えたことで発火したscrollイベントのため、ここで反応すると
+    //   無限ループになる）。そうでなければフラグを立てて、ガント側のscrollTopをWBS側に
+    //   合わせ、フラグを下ろす。
+    // 【結果】ガント本体がWBSパネルと同じ縦位置までスクロールされる。
+    function handleWbsPanelVerticalScroll() {
+      if (isSyncingVerticalScroll) return;
+      isSyncingVerticalScroll = true;
+      document.querySelector(".gantt-scroll-area").scrollTop = document.getElementById("wbsPanel").scrollTop;
+      isSyncingVerticalScroll = false;
+    }
+
+    // 【前提】ガント本体（.gantt-scroll-area）のscrollイベントから呼ばれる。
+    // 【処理】handleWbsPanelVerticalScrollと対になる処理。isSyncingVerticalScrollが立っていれば
+    //   何もしない（WBS側の同期処理由来のscrollイベントのため）。そうでなければフラグを立てて
+    //   WBSパネルのscrollTopをガント側に合わせ、フラグを下ろす。
+    // 【結果】WBSパネルがガント本体と同じ縦位置までスクロールされる。
+    function handleGanttScrollAreaVerticalScroll() {
+      if (isSyncingVerticalScroll) return;
+      isSyncingVerticalScroll = true;
+      document.getElementById("wbsPanel").scrollTop = document.querySelector(".gantt-scroll-area").scrollTop;
+      isSyncingVerticalScroll = false;
+    }
+
     // 【前提】granularity は "day" | "week" | "month" | "quarter"。buttonElement はクリックされたボタン。
     // 【処理】表示粒度を切り替え、ボタンの選択状態を更新した上でガントパネルを再描画する
     //   （DBへの再問い合わせは不要。currentProjectObjectの日付情報だけで再計算できるため）。
@@ -6346,6 +6411,8 @@
       });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      document.getElementById("wbsPanel").addEventListener("scroll", handleWbsPanelVerticalScroll);
+      document.querySelector(".gantt-scroll-area").addEventListener("scroll", handleGanttScrollAreaVerticalScroll);
       document.getElementById("toggleAllScheduleRowsButton").addEventListener("click", handleToggleAllScheduleRowsButtonClick);
       for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
         granularityButton.addEventListener("click", () => handleGranularityButtonClick(granularityButton.dataset.granularity, granularityButton));
