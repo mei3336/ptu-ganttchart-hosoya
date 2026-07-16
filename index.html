@@ -518,6 +518,50 @@
       border-radius: 2px;
     }
 
+    /* UI差分表No.55：マイルストーンのカスタムツールチップ。ブラウザ標準title属性の代わりに
+       data-tooltip属性＋CSSの::after（content:attr()）で、矢印付きの吹き出しを実装する
+       （JS不要）。既定は非表示（opacity:0;visibility:hidden）にし、
+       .gantt-milestone-marker:hoverでフェードインさせる。 */
+    .gantt-milestone-marker::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: -8px;
+      left: -10px;
+      transform: translate(-50%, -100%);
+      background: #292524;
+      color: var(--color-white);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .gantt-milestone-marker::before {
+      content: "";
+      position: absolute;
+      top: -8px;
+      left: -10px;
+      transform: translate(-50%, -100%) translateY(100%);
+      border: 4px solid transparent;
+      border-top-color: #292524;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s ease;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .gantt-milestone-marker:hover::after,
+    .gantt-milestone-marker:hover::before {
+      opacity: 1;
+      visibility: visible;
+    }
+
     /* ===== カンバン（タスク管理） ===== */
     .kanban-board {
       display: flex;
@@ -3615,7 +3659,7 @@
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
         .map(
           (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" title="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
+            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" data-tooltip="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
         )
         .join("");
 
