@@ -3815,7 +3815,8 @@
     // 【処理】名前をprompt()で受け取り（既定値：「{プロジェクト名} - {今日の日付}」、
     //   モーダル・ダイアログ一覧P2）、現在のプロジェクト情報＋スケジュール全件を
     //   dataとして保存する（データモデル設計3.8節：data={project, schedules}）。
-    // 【結果】保存後、パネルを再描画する。
+    // 【結果】保存後、パネルを再描画し、トースト「スナップショットを保存しました」を
+    //   表示する（詳細設計書3.8.3）。
     async function handleSaveSnapshotButtonClick() {
       if (!currentSelectedProjectId || !currentProjectObject) {
         window.alert("先にプロジェクトを選択してください。");
@@ -3836,6 +3837,7 @@
         },
       });
       await refreshSnapshotPanel(currentSelectedProjectId);
+      showToast("スナップショットを保存しました");
     }
 
     // 【前提】snapshotId は削除したいスナップショットのid。
@@ -4022,7 +4024,8 @@
 
     // 【前提】memoId は削除したいメモのid。
     // 【処理】確認ダイアログ（モーダル・ダイアログ一覧C4）の上でdeleteMemoする。
-    // 【結果】確認OK時、削除してパネルを再描画する（選択解除はrefreshMemoPanel側で判定）。
+    // 【結果】確認OK時、削除してパネルを再描画し（選択解除はrefreshMemoPanel側で判定）、
+    //   トースト「メモを削除しました」を表示する（詳細設計書3.7.2）。
     async function handleDeleteMemoButtonClick(memoId) {
       const memoList = await getMemosByProject(currentSelectedProjectId);
       const targetMemo = memoList.find((memo) => memo.id === memoId);
@@ -4030,6 +4033,7 @@
       if (!window.confirm(`「${targetMemo.title || "無題"}」を削除しますか？`)) return;
       await deleteMemo(memoId);
       await refreshMemoPanel(currentSelectedProjectId);
+      showToast("メモを削除しました");
     }
 
     // 【前提】currentSelectedMemoIdが設定済み（エディタにメモが表示されている）であること。
@@ -4481,7 +4485,8 @@
     //   OKならaddProjectで保存してモーダルを閉じ、画面を更新する。保存後、追加/変更の
     //   変更履歴をrecordChangelogEntryで記録する（詳細設計書3.6.1：LOGGED_STORES対象は
     //   保存のたびに自動記録）。
-    // 【結果】保存成功時はモーダルを閉じ、プロジェクト一覧・選択状態を更新する。
+    // 【結果】保存成功時はモーダルを閉じ、プロジェクト一覧・選択状態を更新し、
+    //   トースト「プロジェクトを保存しました」を表示する（詳細設計書3.1.1 step8）。
     async function handleProjectModalSaveButtonClick(existingProject) {
       const name = document.getElementById("projectModalNameInput").value.trim();
       const startDate = document.getElementById("projectModalStartDateInput").value;
@@ -4512,6 +4517,7 @@
       await refreshProjectSelectDropdown();
       document.getElementById("projectSelectDropdown").value = projectToSave.id;
       await switchToProject(projectToSave.id);
+      showToast("プロジェクトを保存しました");
     }
 
     // 【前提】projectId は削除したいプロジェクトのid。project は削除前に取得済みの
@@ -4614,6 +4620,7 @@
     //   （すべてのスケジュールも削除されます）」）の上でdeleteProjectCascadeする。
     //   削除後は、残っている先頭のプロジェクトを選択し直す（無ければ未選択状態にする）。
     // 【結果】確認OK時、プロジェクトと配下データが削除され、画面が更新される。
+    //   トースト「プロジェクトを削除しました」を表示する（詳細設計書3.1.2 step4）。
     async function handleDeleteProjectButtonClick() {
       if (!currentSelectedProjectId || !currentProjectObject) {
         window.alert("先にプロジェクトを選択してください。");
@@ -4628,6 +4635,7 @@
       const nextProjectId = remainingProjectList.length > 0 ? remainingProjectList[0].id : null;
       document.getElementById("projectSelectDropdown").value = nextProjectId || "";
       await switchToProject(nextProjectId);
+      showToast("プロジェクトを削除しました");
     }
 
     // 【前提】schedule はnull（新規作成モード）、または既存スケジュールオブジェクト（編集モード）。
@@ -4853,8 +4861,16 @@
     //   変更履歴をrecordChangelogEntryで記録する（詳細設計書3.6.1）。なおsyncAncestorDates
     //   による祖先スケジュールの日付再計算自体は、子の追加/編集操作の副作用であり独立した
     //   ユーザー操作ではないため、別途ログは残さない（記録するとノイズになるため）。
-    // 【結果】保存成功時はモーダルを閉じ、ガントパネルを更新する。
+    //   ロック中は保存させない（詳細設計書3.1.3：個別関数側でもisLocked相当のチェックを持つ
+    //   方針。「＋スケジュール追加」ボタン自体の無効化だけでは、既存行クリックでの編集を防げないため）。
+    // 【結果】保存成功時はモーダルを閉じ、ガントパネルを更新し、トースト「保存しました」を
+    //   表示する（詳細設計書3.2.1 step5）。ロック中はトースト「ロック中のため編集できません」を
+    //   表示して保存しない。
     async function handleScheduleModalSaveButtonClick(existingSchedule, presetParentId) {
+      if (currentProjectObject?.locked) {
+        showToast("ロック中のため編集できません");
+        return;
+      }
       const name = document.getElementById("scheduleModalNameInput").value.trim();
       const assignee = document.getElementById("scheduleModalAssigneeInput").value.trim();
       const taskStatus = document.getElementById("scheduleModalStatusSelect").value;
@@ -4910,6 +4926,7 @@
       }
       closeModal();
       await refreshGanttPanel(currentSelectedProjectId);
+      showToast("保存しました");
     }
 
     // 【前提】scheduleId は移動したいスケジュールのid。direction は "up" | "down"。
@@ -4918,8 +4935,14 @@
     // 【処理】同じ親を持つ兄弟同士（parentIdが一致するスケジュール）をorder順に並べ、
     //   指定方向の隣接する兄弟とorder値を入れ替えて保存する（基本設計書4.1節：
     //   「並び替えは同一階層内でのみ可能」を、parentId一致という条件でそのまま満たす）。
-    // 【結果】隣接する2件のorderが入れ替わり、ガントパネルが再描画される。
+    // 【結果】隣接する2件のorderが入れ替わり、ガントパネルが再描画され、
+    //   トースト「並び順を変更しました」を表示する（詳細設計書3.2.4）。
+    //   ロック中は何もしない（トースト「ロック中のため編集できません」）。
     async function handleMoveScheduleOrderClick(scheduleId, direction) {
+      if (currentProjectObject?.locked) {
+        showToast("ロック中のため編集できません");
+        return;
+      }
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
       if (!targetRow) return;
 
@@ -4937,6 +4960,7 @@
       await addSchedule({ ...currentSchedule, order: swapSchedule.order });
       await addSchedule({ ...swapSchedule, order: currentOrder });
       await refreshGanttPanel(currentSelectedProjectId);
+      showToast("並び順を変更しました");
     }
 
     // 【前提】draggedId は掴んで動かしたスケジュールのid。targetId はドロップ先の行のid。
@@ -4945,9 +4969,15 @@
     // 【処理】ドラッグ対象と同じ兄弟グループ内で、ドロップ先の位置へドラッグ対象を移動し、
     //   兄弟全員のorderを0番から振り直して保存する（クリックでの上下移動は隣接swapで済むが、
     //   ドラッグは任意の位置へ一気に移動できるため、隣接swapでは対応できず全員の振り直しが必要）。
-    // 【結果】兄弟内の並び順が変わり、ガントパネルが再描画される。
+    // 【結果】兄弟内の並び順が変わり、ガントパネルが再描画され、
+    //   トースト「並び順を変更しました」を表示する（詳細設計書3.2.4）。
+    //   ロック中は何もしない（トースト「ロック中のため編集できません」）。
     async function handleScheduleDragDrop(draggedId, targetId) {
       if (draggedId === targetId) return;
+      if (currentProjectObject?.locked) {
+        showToast("ロック中のため編集できません");
+        return;
+      }
       const draggedRow = currentScheduleTreeRows.find((row) => row.schedule.id === draggedId);
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === targetId);
       if (!draggedRow || !targetRow) return;
@@ -4966,14 +4996,21 @@
         await addSchedule({ ...siblingSchedules[index], order: index });
       }
       await refreshGanttPanel(currentSelectedProjectId);
+      showToast("並び順を変更しました");
     }
 
     // 【前提】scheduleId は削除したいスケジュールのid。
     // 【処理】子の有無でC2（子なし）／C3（子あり・サブタスクごと削除）の確認文言を切り替えて
     //   confirm()し、OKならdeleteScheduleCascadeで削除する（連鎖削除・コメント削除・
     //   変更履歴記録・祖先日付再計算は既存の複合操作にすべて任せる）。
-    // 【結果】確認OK時、対象と子孫が削除されガントパネルが再描画される。キャンセル時は何もしない。
+    // 【結果】確認OK時、対象と子孫が削除されガントパネルが再描画され、トースト「削除しました」を
+    //   表示する（詳細設計書3.2.2 step4）。キャンセル時は何もしない。
+    //   ロック中は確認ダイアログより前に中断する（トースト「ロック中のため編集できません」）。
     async function handleDeleteScheduleButtonClick(scheduleId) {
+      if (currentProjectObject?.locked) {
+        showToast("ロック中のため編集できません");
+        return;
+      }
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
       if (!targetRow) return;
       const confirmMessage = targetRow.hasChildren
@@ -4982,6 +5019,7 @@
       if (!window.confirm(confirmMessage)) return;
       await deleteScheduleCascade(scheduleId, currentSelectedProjectId);
       await refreshGanttPanel(currentSelectedProjectId);
+      showToast("削除しました");
     }
 
     // 【前提】action は "toggle-collapse" | "move-up" | "move-down" | "add-child" | "edit" | "delete"。
@@ -5439,7 +5477,8 @@
     // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
     // 【処理】現在のプロジェクトのlockedを反転させて保存し、画面のロック表示を更新する
     //   （基本設計書3.3節：ロックONで薄赤帯表示・スケジュール追加ボタン無効化）。
-    // 【結果】ロック状態がDBに保存され、画面にも反映される。
+    // 【結果】ロック状態がDBに保存され、画面にも反映される。トースト「ロックしました」／
+    //   「ロックを解除しました」を、切替後の状態に応じて表示する（詳細設計書3.1.3）。
     async function handleLockToggleButtonClick() {
       if (!currentProjectObject) {
         window.alert("先にプロジェクトを選択してください。");
@@ -5449,6 +5488,7 @@
       await addProject(updatedProject);
       currentProjectObject = updatedProject;
       applyLockState(updatedProject.locked);
+      showToast(updatedProject.locked ? "ロックしました" : "ロックを解除しました");
     }
 
     // 【前提】currentTimelineStartDateStringが設定済み（ガントパネルが1度は描画済み）であること。
