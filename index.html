@@ -737,6 +737,25 @@
       flex: 1;
     }
 
+    /* M3：マイルストーン管理モーダルの行（名前＋日付＋削除ボタン）。 */
+    #milestoneModalRowsContainer {
+      max-height: 40vh;
+      overflow-y: auto;
+      margin-bottom: 8px;
+    }
+
+    .modal-milestone-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .modal-milestone-row .modal-milestone-name-input {
+      flex: 1;
+      min-width: 0;
+    }
+
     .modal-actions {
       display: flex;
       justify-content: flex-end;
@@ -3093,11 +3112,13 @@
     }
 
     // 【前提】milestones は project.milestones（{name, date}の配列）。
-    // 【処理】日付を持つマイルストーンについて、タイムライン上のx座標（px）を計算する。
+    // 【処理】名前・日付の両方を持つマイルストーンについて、タイムライン上のx座標（px）を
+    //   計算する（詳細設計書3.11.1エラーバリエーション：名前が空の行は保存自体は成功するが
+    //   ガントチャート上には表示されない仕様のため、name不在の行を除外する）。
     // 【結果】{leftPx, name}[] を返す。
     function calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay) {
       return milestones
-        .filter((milestone) => Boolean(milestone.date))
+        .filter((milestone) => Boolean(milestone.date) && Boolean(milestone.name))
         .map((milestone) => ({
           leftPx: calculateDayOffsetFromTimelineStart(milestone.date, timelineStartDateString) * pixelsPerDay,
           name: milestone.name,
@@ -4464,6 +4485,132 @@
       openProjectModal(currentProjectObject);
     }
 
+    // ===== M3：マイルストーン管理モーダル =====
+    // 【設計判断】名前・日付の行を保存ボタンを押すまでDBに反映しない「作業用コピー」
+    //   （milestoneModalDraftRows）を持つ。行の追加・削除のたびに#milestoneModalRowsContainerの
+    //   innerHTMLを丸ごと再構築するため、削除ボタン（動的に増減する要素）はイベント委譲で
+    //   拾う。再構築の直前には必ずsyncMilestoneModalDraftRowsFromDomでDOM上の現在値を
+    //   作業用コピーへ書き戻す（他の行への入力中の変更を、行追加・削除で消さないため）。
+
+    // 現在開いているマイルストーン管理モーダルの作業用コピー（{name, date}の配列）。
+    let milestoneModalDraftRows = [];
+
+    // 【前提】draftRows は milestoneModalDraftRows と同じ形の配列。
+    // 【処理】1行分＝名前入力・日付入力・削除ボタンのHTML文字列を、行インデックス付きで組み立てる
+    //   （基本設計書2.2節：「マイルストーン名」「日付」の入力行、行ごとに×削除ボタン）。
+    // 【結果】#milestoneModalRowsContainerの中身にそのまま入れられるHTML文字列を返す。
+    function renderMilestoneModalRowsToHtml(draftRows) {
+      return draftRows
+        .map(
+          (row, index) => `<div class="modal-milestone-row" data-row-index="${index}">
+            <input type="text" class="modal-milestone-name-input" placeholder="マイルストーン名" value="${escapeHtmlText(row.name)}">
+            <input type="date" class="modal-milestone-date-input" value="${escapeHtmlText(row.date)}" required>
+            <button type="button" class="wbs-icon-button" data-action="remove-milestone-row" title="削除">×</button>
+          </div>`
+        )
+        .join("");
+    }
+
+    // 【前提】draftRows は milestoneModalDraftRows と同じ形の配列。
+    // 【処理】M3モーダル全体（行一覧＋行追加ボタン＋キャンセル／保存）のHTML文字列を組み立てる
+    //   （モーダル・ダイアログ一覧M3）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderMilestoneModalToHtml(draftRows) {
+      return `
+        <h2>マイルストーン管理</h2>
+        <div id="milestoneModalRowsContainer">${renderMilestoneModalRowsToHtml(draftRows)}</div>
+        <button type="button" class="panel-add-button" id="addMilestoneRowButton">＋マイルストーンを追加</button>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="milestoneModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="milestoneModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】なし。
+    // 【処理】現在表示されている各行のDOM入力値を読み取り、milestoneModalDraftRowsへ書き戻す。
+    //   行の追加・削除でHTMLを再構築する前に必ず呼ぶことで、未保存の入力を失わないようにする。
+    // 【結果】milestoneModalDraftRowsが画面表示と同じ内容になる。
+    function syncMilestoneModalDraftRowsFromDom() {
+      const rowElements = document.querySelectorAll("#milestoneModalRowsContainer .modal-milestone-row");
+      milestoneModalDraftRows = Array.from(rowElements).map((rowElement) => ({
+        name: rowElement.querySelector(".modal-milestone-name-input").value,
+        date: rowElement.querySelector(".modal-milestone-date-input").value,
+      }));
+    }
+
+    // 【前提】milestoneModalDraftRowsが最新であること（呼び出し前にsync済み）。
+    // 【処理】#milestoneModalRowsContainerの中身をmilestoneModalDraftRowsの内容で再構築する。
+    // 【結果】行一覧の表示が作業用コピーと一致する。
+    function rerenderMilestoneModalRows() {
+      document.getElementById("milestoneModalRowsContainer").innerHTML = renderMilestoneModalRowsToHtml(milestoneModalDraftRows);
+    }
+
+    // 【前提】なし。
+    // 【処理】現在の入力値をsyncしたうえで、末尾に空行（{name:"",date:""}）を追加して再描画する
+    //   （基本設計書2.2節：「＋マイルストーンを追加」で行を追加）。
+    // 【結果】行一覧に空行が1行増える。
+    function handleAddMilestoneRowButtonClick() {
+      syncMilestoneModalDraftRowsFromDom();
+      milestoneModalDraftRows.push({ name: "", date: "" });
+      rerenderMilestoneModalRows();
+    }
+
+    // 【前提】rowIndex は削除対象行の、現在の表示順でのインデックス。
+    // 【処理】現在の入力値をsyncしたうえで、指定インデックスの行を取り除いて再描画する。
+    // 【結果】行一覧から指定行が消える。
+    function handleRemoveMilestoneRowButtonClick(rowIndex) {
+      syncMilestoneModalDraftRowsFromDom();
+      milestoneModalDraftRows.splice(rowIndex, 1);
+      rerenderMilestoneModalRows();
+    }
+
+    // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
+    // 【処理】現在の入力値をDOMから読み取り、project.milestonesを丸ごと置き換えてaddProjectで
+    //   保存する（詳細設計書3.11.1：1回の保存で複数行の追加・削除をまとめて反映。差分ではなく
+    //   丸ごと置換）。名前が空の行があってもエラーにはしない（同節エラーバリエーション：
+    //   保存自体は成功し、該当行はガントチャート上に表示されないだけ）。
+    //   milestonesはPROJECT_LOGGED_FIELD_LABELSの対象外のため、この保存では変更履歴は
+    //   記録されない（詳細設計書3.11.1に変更履歴への言及が無いことに合わせる）。
+    // 【結果】保存後、モーダルを閉じてガントパネルを再描画し、
+    //   トースト「マイルストーンを保存しました」を表示する。
+    async function handleMilestoneModalSaveButtonClick() {
+      syncMilestoneModalDraftRowsFromDom();
+      const updatedProject = {
+        ...currentProjectObject,
+        milestones: milestoneModalDraftRows.map((row) => ({ name: row.name, date: row.date })),
+      };
+      await addProject(updatedProject);
+      currentProjectObject = updatedProject;
+      closeModal();
+      await refreshGanttPanel(currentSelectedProjectId);
+      showToast("マイルストーンを保存しました");
+    }
+
+    // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること
+    //   （マイルストーンボタン自体が未選択時・ロック中はdisabledのため、通常はここに
+    //   到達する時点で選択済み）。
+    // 【処理】現在のproject.milestonesを作業用コピーへ複製してモーダルを開き、
+    //   行追加・削除（イベント委譲）・キャンセル・保存にイベントを登録する。
+    // 【結果】マイルストーン管理モーダルが操作可能な状態で表示される。
+    function openMilestoneModal() {
+      if (!currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      milestoneModalDraftRows = currentProjectObject.milestones.map((milestone) => ({ ...milestone }));
+      openModal(renderMilestoneModalToHtml(milestoneModalDraftRows));
+      document.getElementById("milestoneModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("addMilestoneRowButton").addEventListener("click", handleAddMilestoneRowButtonClick);
+      document.getElementById("milestoneModalSaveButton").addEventListener("click", handleMilestoneModalSaveButtonClick);
+      document.getElementById("milestoneModalRowsContainer").addEventListener("click", (event) => {
+        const removeButton = event.target.closest('[data-action="remove-milestone-row"]');
+        if (!removeButton) return;
+        const rowElement = removeButton.closest(".modal-milestone-row");
+        handleRemoveMilestoneRowButtonClick(Number(rowElement.dataset.rowIndex));
+      });
+    }
+
     // 3年後の判定はうるう年を厳密に数えず、365日×3年分の日数で近似する（実務上十分な簡略化）。
     const THREE_YEARS_IN_MILLISECONDS = 3 * 365 * MILLISECONDS_PER_DAY;
 
@@ -5650,6 +5797,7 @@
         outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
       }
       document.getElementById("editProjectButton").addEventListener("click", handleEditProjectButtonClick);
+      document.getElementById("milestoneButton").addEventListener("click", openMilestoneModal);
       // モーダル外側（オーバーレイ自身）をクリックしたときだけ閉じる
       // （モーダル・ダイアログ一覧2.3節：「モーダル外側をクリックすると閉じる」）。
       document.getElementById("modalOverlay").addEventListener("click", (event) => {
