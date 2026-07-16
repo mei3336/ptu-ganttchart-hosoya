@@ -1083,14 +1083,16 @@
         <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
       </div>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="全て開く・全て閉じる">全て開く／閉じる</button>
+      <!-- 初期表示は「全て閉じる」（基本設計書2.2：押すたびにラベルが入れ替わるだけの
+           単純なボタン状態フラグ。個々の行の実際の開閉状態は見ない）。 -->
+      <button id="toggleAllScheduleRowsButton" class="toolbar-button" type="button">全て閉じる</button>
       <!-- 列トグル（開始/終了/状態）も同様に1つの塊としてまとめる。 -->
       <div class="button-group">
         <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
         <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
         <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
       </div>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="マイルストーン管理">マイルストーン</button>
+      <button id="milestoneButton" class="toolbar-button" type="button">マイルストーン</button>
       <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
     <div class="header-group">
@@ -2678,6 +2680,12 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
+    // 【設計判断】「全て開く／全て閉じる」ボタンの表示文言・次の動作を決めるための、
+    //   ボタン自身が持つ状態フラグ（基本設計書2.2節：「個々の行の実際の開閉状態は判定材料に
+    //   せず、ボタン自体が持つ状態フラグをそのまま反転させるだけの単純な実装」）。
+    //   trueなら現在のラベルは「全て閉じる」（押すと閉じる動作）、falseなら「全て開く」。
+    //   個々の行の開閉状態（collapsedScheduleIds）とは意図的に無関係に管理する。
+    let isToggleAllButtonShowingCloseLabel = true;
     // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
     // DB非保存の画面上だけの一時状態にする。
     const collapsedMindmapIssueIds = new Set();
@@ -3623,13 +3631,15 @@
     }
 
     // 【前提】isLocked は現在のプロジェクトのロック状態。
-    // 【処理】ロック帯の表示・スケジュール追加ボタンの活性状態・ロックボタンの選択状態・
-    //   プロジェクト削除ボタンの表示有無をまとめて切り替える（基本設計書3.3節：
-    //   ロック中はスケジュール追加ボタンを無効化し、プロジェクト削除ボタンは非表示にする）。
+    // 【処理】ロック帯の表示・スケジュール追加／マイルストーンボタンの活性状態・
+    //   ロックボタンの選択状態・プロジェクト削除ボタンの表示有無をまとめて切り替える
+    //   （基本設計書3.3節：ロック中は「スケジュール追加」「マイルストーン」ボタンが
+    //   淡色化・無効化され、プロジェクト削除ボタンは非表示になる）。
     // 【結果】画面上のロック関連の見た目が状態に一致する。
     function applyLockState(isLocked) {
       document.getElementById("lockBand").hidden = !isLocked;
       document.getElementById("addScheduleButton").disabled = isLocked;
+      document.getElementById("milestoneButton").disabled = isLocked;
       document.getElementById("lockToggleButton").classList.toggle("is-active", isLocked);
       document.getElementById("deleteProjectButton").hidden = isLocked;
     }
@@ -4984,6 +4994,25 @@
       await refreshGanttPanel(currentSelectedProjectId);
     }
 
+    // 【前提】isToggleAllButtonShowingCloseLabelが現在の表示ラベルを表す（true＝「全て閉じる」）。
+    // 【処理】現在のラベルに応じて、子を持つ全スケジュールをcollapsedScheduleIdsへ追加する（閉じる）
+    //   か、collapsedScheduleIds自体を空にする（開く）かのどちらかを行い、フラグを反転させて
+    //   ボタンのラベルを入れ替える。個々の行が現在開いているか閉じているかは判定材料にしない
+    //   （基本設計書2.2節：ボタン自身の状態フラグをそのまま反転させるだけの単純な実装）。
+    // 【結果】WBS・ガント両パネルが再描画され、ボタンのラベルが入れ替わる。
+    function handleToggleAllScheduleRowsButtonClick() {
+      if (isToggleAllButtonShowingCloseLabel) {
+        for (const row of currentScheduleTreeRows) {
+          if (row.hasChildren) collapsedScheduleIds.add(row.schedule.id);
+        }
+      } else {
+        collapsedScheduleIds.clear();
+      }
+      isToggleAllButtonShowingCloseLabel = !isToggleAllButtonShowingCloseLabel;
+      document.getElementById("toggleAllScheduleRowsButton").textContent = isToggleAllButtonShowingCloseLabel ? "全て閉じる" : "全て開く";
+      rerenderWbsAndGanttFromCache();
+    }
+
     // 【前提】action は "toggle-collapse" | "move-up" | "move-down" | "add-child" | "edit" | "delete"。
     //   scheduleId はアイコンが乗っていたWBS行のスケジュールid。
     // 【処理】WBS行のホバーアイコン共通のディスパッチャー。開閉トグルはDB再取得不要のため
@@ -5609,6 +5638,7 @@
       });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      document.getElementById("toggleAllScheduleRowsButton").addEventListener("click", handleToggleAllScheduleRowsButtonClick);
       for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
         granularityButton.addEventListener("click", () => handleGranularityButtonClick(granularityButton.dataset.granularity, granularityButton));
       }
