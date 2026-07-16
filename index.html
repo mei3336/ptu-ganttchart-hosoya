@@ -1164,6 +1164,59 @@
       opacity: 1;
       transform: translateY(0);
     }
+
+    /* UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。
+       position:fixedでevent.clientX/clientYにそのまま配置する（スクロール位置の
+       補正が不要になるため）。 */
+    .task-popup {
+      position: fixed;
+      z-index: 150;
+      width: 220px;
+      background: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      padding: 12px;
+      font-size: 12px;
+    }
+
+    .task-popup[hidden] {
+      display: none;
+    }
+
+    .task-popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .task-popup-progress-track {
+      height: 6px;
+      background: var(--color-surface-3);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+
+    .task-popup-progress-fill {
+      height: 100%;
+      background: var(--color-accent);
+    }
+
+    .task-popup-progress-label {
+      font-size: 11px;
+      color: var(--color-text-light);
+      margin-bottom: 8px;
+    }
+
+    .task-popup-notes {
+      color: var(--color-text-mid);
+      white-space: pre-wrap;
+      max-height: 100px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -1355,6 +1408,10 @@
   <!-- 共通UI部品：トースト通知（UIデザイン仕様書2.4節）。showToast()がtextContentとshowクラスを
        差し替えるだけの単一の入れ物で、全機能から共通で使い回す。 -->
   <div id="toast"></div>
+
+  <!-- UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。openScheduleModalの
+       中央モーダルとは別物で、クリックしたバーの近くに表示する共通の入れ物。 -->
+  <div id="taskPopup" class="task-popup" hidden></div>
 
   <script>
     "use strict";
@@ -5361,6 +5418,11 @@
     let barDragStartStartDate = "";
     let barDragStartEndDate = "";
     let barDragPixelsPerDay = 0;
+    // これ未満の移動量は「クリック」とみなす（MINDMAP_DRAG_THRESHOLD_PXと同じ考え方）。
+    // pointerup直後に発火するclickイベントで、実際にドラッグした場合だけタスクポップアップを
+    // 開かせないようにするため、handleBarPointerUpが移動量を判定してこの変数に記録する。
+    const BAR_CLICK_VS_DRAG_THRESHOLD_PX = 3;
+    let wasBarPointerMovedSignificantly = false;
 
     // 【前提】rootScheduleId は起点スケジュールのid。allSchedules は同一プロジェクト内の
     //   全スケジュール。
@@ -5454,6 +5516,8 @@
       const mode = draggedBarMode;
       draggedBarScheduleId = null;
       draggedBarMode = null;
+      wasBarPointerMovedSignificantly =
+        Math.abs(event.clientX - barDragStartPointerX) >= BAR_CLICK_VS_DRAG_THRESHOLD_PX;
 
       const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${scheduleId}"]`);
       if (barElement) barElement.classList.remove("is-bar-dragging");
@@ -5500,6 +5564,57 @@
 
       await refreshGanttPanel(currentSelectedProjectId);
       showToast("スケジュールを更新しました");
+    }
+
+    // ===== ガントバー直接クリックの軽量ポップアップ（UI差分表No.75／対応表No.17） =====
+    // 【設計判断】既存のopenScheduleModal（中央モーダル・フォーム編集）とは別物。クリックした
+    //   バーの近くに表示する読み取り専用の簡易ポップアップで、名前・進捗・メモを確認できる。
+    //   #taskPopupという共通の入れ物1つを使い回す（#toast/#modalOverlayと同じ設計）。
+    //   進捗率の算出根拠：対応表No.17の抜粋にはdur（日数）はあるが%の算出式が現れておらず、
+    //   データモデルにも数値の進捗フィールドが無い。ここではステータス
+    //   （未着手0%／進行中50%／完了100%）から簡易に算出する（要判断事項として明示）。
+    const PROGRESS_PERCENT_BY_SCHEDULE_STATUS = { todo: 0, inprogress: 50, done: 100 };
+
+    // 【前提】schedule は表示対象のスケジュールオブジェクト。
+    // 【処理】名前・進捗バー・メモ（読み取り専用）のHTML文字列を組み立てる。
+    // 【結果】#taskPopupのinnerHTMLにそのまま入れられるHTML文字列を返す。
+    function renderTaskPopupToHtml(schedule) {
+      const progressPercent = PROGRESS_PERCENT_BY_SCHEDULE_STATUS[schedule.taskStatus] ?? 0;
+      const notesText = schedule.notes ? escapeHtmlText(schedule.notes) : "（メモはありません）";
+      return `
+        <div class="task-popup-header">
+          <strong>${escapeHtmlText(schedule.name)}</strong>
+          <button type="button" class="slide-panel-close-button" id="taskPopupCloseButton">×</button>
+        </div>
+        <div class="task-popup-progress-track"><div class="task-popup-progress-fill" style="width:${progressPercent}%"></div></div>
+        <div class="task-popup-progress-label">進捗：${progressPercent}%</div>
+        <div class="task-popup-notes">${notesText}</div>
+      `;
+    }
+
+    // 【前提】なし。
+    // 【処理】#taskPopupを非表示にし、中身を空にする（closeModalと同じ考え方）。
+    // 【結果】ポップアップが非表示になる。
+    function closeTaskPopup() {
+      const popupElement = document.getElementById("taskPopup");
+      popupElement.hidden = true;
+      popupElement.innerHTML = "";
+    }
+
+    // 【前提】scheduleId はポップアップ表示対象のスケジュールid。clientX/clientY はクリック位置
+    //   （position:fixedでそのまま使えるビューポート座標）。
+    // 【処理】対象スケジュールの内容でポップアップを組み立てて表示位置を設定し、
+    //   閉じるボタンにイベントを登録する。
+    // 【結果】ポップアップがクリック位置の近くに表示される。
+    function openTaskPopup(scheduleId, clientX, clientY) {
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+      const popupElement = document.getElementById("taskPopup");
+      popupElement.innerHTML = renderTaskPopupToHtml(scheduleRow.schedule);
+      popupElement.style.left = `${clientX}px`;
+      popupElement.style.top = `${clientY}px`;
+      popupElement.hidden = false;
+      document.getElementById("taskPopupCloseButton").addEventListener("click", closeTaskPopup);
     }
 
     // 【前提】scheduleId は削除したいスケジュールのid。
@@ -6112,6 +6227,27 @@
       });
       document.addEventListener("pointermove", handleBarPointerMove);
       document.addEventListener("pointerup", handleBarPointerUp);
+      // ガントバー直接クリックの軽量ポップアップ（UI差分表No.75）。pointerup直後に発火する
+      // clickイベントで開く。実際にドラッグした場合（wasBarPointerMovedSignificantly）は
+      // 開かない。
+      document.getElementById("ganttPanelBody").addEventListener("click", (event) => {
+        const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
+        if (!barElement) return;
+        if (wasBarPointerMovedSignificantly) {
+          wasBarPointerMovedSignificantly = false;
+          return;
+        }
+        openTaskPopup(barElement.dataset.scheduleId, event.clientX, event.clientY);
+      });
+      // ポップアップの外側をクリックしたら閉じる（別のバーをクリックした場合は、そちらの
+      // ハンドラが新しい内容で開き直すため、ここでは閉じない）。
+      document.addEventListener("click", (event) => {
+        const popupElement = document.getElementById("taskPopup");
+        if (popupElement.hidden) return;
+        if (popupElement.contains(event.target)) return;
+        if (event.target.closest(".gantt-bar")) return;
+        closeTaskPopup();
+      });
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
