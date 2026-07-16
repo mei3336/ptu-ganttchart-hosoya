@@ -474,6 +474,12 @@
       background: rgba(0, 0, 0, .18);
     }
 
+    /* UI差分表No.52：バーホバー時の演出（お手本：filter:brightness(.9);box-shadow強調）。 */
+    .gantt-bar:hover {
+      filter: brightness(.9);
+      box-shadow: var(--shadow-medium);
+    }
+
     .gantt-bar.is-bar-dragging {
       opacity: .85;
       box-shadow: var(--shadow-medium);
