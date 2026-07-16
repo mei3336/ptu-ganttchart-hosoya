@@ -1157,8 +1157,8 @@
         <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
       </div>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
-      <!-- 初期表示は「全て閉じる」（基本設計書2.2：押すたびにラベルが入れ替わるだけの
-           単純なボタン状態フラグ。個々の行の実際の開閉状態は見ない）。 -->
+      <!-- 初期表示は仮の文言。実際のラベルはrerenderWbsAndGanttFromCacheが、親行の実際の
+           開閉状態（areAllParentRowsCollapsed）を毎回判定して都度上書きする（対応表No.39）。 -->
       <button id="toggleAllScheduleRowsButton" class="toolbar-button" type="button">全て閉じる</button>
       <!-- 列トグル（開始/終了/状態）も同様に1つの塊としてまとめる。 -->
       <div class="button-group">
@@ -2758,12 +2758,6 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
-    // 【設計判断】「全て開く／全て閉じる」ボタンの表示文言・次の動作を決めるための、
-    //   ボタン自身が持つ状態フラグ（基本設計書2.2節：「個々の行の実際の開閉状態は判定材料に
-    //   せず、ボタン自体が持つ状態フラグをそのまま反転させるだけの単純な実装」）。
-    //   trueなら現在のラベルは「全て閉じる」（押すと閉じる動作）、falseなら「全て開く」。
-    //   個々の行の開閉状態（collapsedScheduleIds）とは意図的に無関係に管理する。
-    let isToggleAllButtonShowingCloseLabel = true;
     // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
     // DB非保存の画面上だけの一時状態にする。
     const collapsedMindmapIssueIds = new Set();
@@ -2894,6 +2888,18 @@
         }
       }
       return visibleRows;
+    }
+
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。collapsedScheduleIds は
+    //   折りたたまれているスケジュールidの集合（Set）。
+    // 【処理】子を持つ行（親行）だけを抽出し、1件以上存在し、かつ全件がcollapsedScheduleIdsに
+    //   含まれているかを判定する（対応表No.39のお手本ロジック：
+    //   `parents.length>0&&parents.every(t=>S.collapsed.has(t.id))`と同じ判定）。
+    //   親行が1件も無い場合はfalseを返す（＝「全て開く」表示にする）。
+    // 【結果】親行がすべて折りたたまれていればtrue、そうでなければfalseを返す。
+    function areAllParentRowsCollapsed(scheduleTreeRows, collapsedScheduleIds) {
+      const parentRows = scheduleTreeRows.filter((row) => row.hasChildren);
+      return parentRows.length > 0 && parentRows.every((row) => collapsedScheduleIds.has(row.schedule.id));
     }
 
     // 【前提】taskList は同一プロジェクト内のタスク全件。
@@ -3806,7 +3812,12 @@
     //   列表示・表示粒度の状態だけを使って、WBSパネル・ガント本体の両方を再描画する。
     //   行の折りたたみ切替のように「DBの中身は変わっていないが見た目の状態だけ変わった」
     //   場面で使う（DB再取得を伴うrefreshGanttPanelと役割を分ける）。
-    // 【結果】WBS・ガント両パネルの表示が、現在のキャッシュ・状態を反映したものに更新される。
+    //   「全て開く／全て閉じる」ボタンのラベルも、毎回areAllParentRowsCollapsedで判定し直して
+    //   更新する（対応表No.39：クリック時だけでなく画面描画のたびに実際の状態を見るお手本の
+    //   方式に合わせる。個別行を手動開閉した場合でもラベルと実際の状態が食い違わないようにする
+    //   ため）。
+    // 【結果】WBS・ガント両パネルの表示と、全て開く/閉じるボタンのラベルが、現在のキャッシュ・
+    //   状態を反映したものに更新される。
     function rerenderWbsAndGanttFromCache() {
       const visibleScheduleTreeRows = filterVisibleScheduleTreeRows(currentScheduleTreeRows, collapsedScheduleIds);
       const timelineDays = buildGanttTimelineDays(currentProjectObject.startDate, currentProjectObject.endDate);
@@ -3824,6 +3835,12 @@
           todayDateString
         )
       );
+      document.getElementById("toggleAllScheduleRowsButton").textContent = areAllParentRowsCollapsed(
+        currentScheduleTreeRows,
+        collapsedScheduleIds
+      )
+        ? "全て開く"
+        : "全て閉じる";
     }
 
     // 【前提】projectId はnull、または実在するプロジェクトのid。currentProjectObjectが
@@ -5673,22 +5690,21 @@
       showToast("削除しました");
     }
 
-    // 【前提】isToggleAllButtonShowingCloseLabelが現在の表示ラベルを表す（true＝「全て閉じる」）。
-    // 【処理】現在のラベルに応じて、子を持つ全スケジュールをcollapsedScheduleIdsへ追加する（閉じる）
-    //   か、collapsedScheduleIds自体を空にする（開く）かのどちらかを行い、フラグを反転させて
-    //   ボタンのラベルを入れ替える。個々の行が現在開いているか閉じているかは判定材料にしない
-    //   （基本設計書2.2節：ボタン自身の状態フラグをそのまま反転させるだけの単純な実装）。
-    // 【結果】WBS・ガント両パネルが再描画され、ボタンのラベルが入れ替わる。
+    // 【前提】currentScheduleTreeRows・collapsedScheduleIdsが設定済みであること。
+    // 【処理】areAllParentRowsCollapsedで「親行が現在すべて折りたたまれているか」を判定し、
+    //   trueならcollapsedScheduleIdsを空にする（全展開）、falseなら子を持つ全スケジュールを
+    //   collapsedScheduleIdsへ追加する（全折りたたみ）。対応表No.39のお手本と同じ判定方式
+    //   （個々の行の実際の開閉状態を毎回チェックする。ボタン自身の状態フラグは持たない）。
+    //   ラベルの更新はrerenderWbsAndGanttFromCache側が毎回行うため、ここでは行わない。
+    // 【結果】WBS・ガント両パネルが再描画され、ボタンのラベルも最新の状態に更新される。
     function handleToggleAllScheduleRowsButtonClick() {
-      if (isToggleAllButtonShowingCloseLabel) {
+      if (areAllParentRowsCollapsed(currentScheduleTreeRows, collapsedScheduleIds)) {
+        collapsedScheduleIds.clear();
+      } else {
         for (const row of currentScheduleTreeRows) {
           if (row.hasChildren) collapsedScheduleIds.add(row.schedule.id);
         }
-      } else {
-        collapsedScheduleIds.clear();
       }
-      isToggleAllButtonShowingCloseLabel = !isToggleAllButtonShowingCloseLabel;
-      document.getElementById("toggleAllScheduleRowsButton").textContent = isToggleAllButtonShowingCloseLabel ? "全て閉じる" : "全て開く";
       rerenderWbsAndGanttFromCache();
     }
 
