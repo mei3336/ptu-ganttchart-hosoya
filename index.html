@@ -443,10 +443,39 @@
       white-space: nowrap;
       overflow: hidden;
       box-shadow: var(--shadow-small);
+      cursor: grab;
+      touch-action: none;
     }
 
     .gantt-bar.is-parent-bar {
       border-radius: 8px;
+    }
+
+    /* 詳細設計書3.2.4：掴み手は常時表示ではなく、バーにマウスを乗せた時のみうっすら色が付く。
+       葉ノード（子を持たない行）にしか付与されない（renderGanttBodyToHtml側の分岐）。 */
+    .gantt-bar-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: ew-resize;
+    }
+
+    .bar-lh {
+      left: 0;
+    }
+
+    .bar-rh {
+      right: 0;
+    }
+
+    .gantt-bar:hover .gantt-bar-handle {
+      background: rgba(0, 0, 0, .18);
+    }
+
+    .gantt-bar.is-bar-dragging {
+      opacity: .85;
+      box-shadow: var(--shadow-medium);
     }
 
     .gantt-bar.is-done-status {
@@ -735,6 +764,25 @@
 
     .modal-comment-post-form input {
       flex: 1;
+    }
+
+    /* M3：マイルストーン管理モーダルの行（名前＋日付＋削除ボタン）。 */
+    #milestoneModalRowsContainer {
+      max-height: 40vh;
+      overflow-y: auto;
+      margin-bottom: 8px;
+    }
+
+    .modal-milestone-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .modal-milestone-row .modal-milestone-name-input {
+      flex: 1;
+      min-width: 0;
     }
 
     .modal-actions {
@@ -1092,14 +1140,16 @@
         <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
       </div>
       <button id="todayButton" class="toolbar-button" type="button">今日</button>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="全て開く・全て閉じる">全て開く／閉じる</button>
+      <!-- 初期表示は「全て閉じる」（基本設計書2.2：押すたびにラベルが入れ替わるだけの
+           単純なボタン状態フラグ。個々の行の実際の開閉状態は見ない）。 -->
+      <button id="toggleAllScheduleRowsButton" class="toolbar-button" type="button">全て閉じる</button>
       <!-- 列トグル（開始/終了/状態）も同様に1つの塊としてまとめる。 -->
       <div class="button-group">
         <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
         <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
         <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
       </div>
-      <button class="toolbar-button" type="button" data-out-of-scope-label="マイルストーン管理">マイルストーン</button>
+      <button id="milestoneButton" class="toolbar-button" type="button">マイルストーン</button>
       <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
     <div class="header-group">
@@ -2691,6 +2741,12 @@
     // 折りたたまれているスケジュールidの集合。DBには保存しない画面上だけの一時状態
     // （プロジェクト切替・再読み込みでリセットされてよい表示上の状態のため）。
     const collapsedScheduleIds = new Set();
+    // 【設計判断】「全て開く／全て閉じる」ボタンの表示文言・次の動作を決めるための、
+    //   ボタン自身が持つ状態フラグ（基本設計書2.2節：「個々の行の実際の開閉状態は判定材料に
+    //   せず、ボタン自体が持つ状態フラグをそのまま反転させるだけの単純な実装」）。
+    //   trueなら現在のラベルは「全て閉じる」（押すと閉じる動作）、falseなら「全て開く」。
+    //   個々の行の開閉状態（collapsedScheduleIds）とは意図的に無関係に管理する。
+    let isToggleAllButtonShowingCloseLabel = true;
     // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
     // DB非保存の画面上だけの一時状態にする。
     const collapsedMindmapIssueIds = new Set();
@@ -3097,12 +3153,66 @@
       return { leftPx: dayOffsetStart * pixelsPerDay, widthPx: durationDays * pixelsPerDay, durationDays };
     }
 
+    // 【前提】dateString は"YYYY-MM-DD"形式。days は加算したい日数（負値可）。
+    // 【処理】UTC基準のタイムスタンプへ変換して日数を加算し、"YYYY-MM-DD"形式へ戻す。
+    // 【結果】計算後の日付文字列を返す。
+    function shiftDateStringByDays(dateString, days) {
+      const shiftedTimestamp = parseDateStringToUtcTimestamp(dateString) + days * MILLISECONDS_PER_DAY;
+      return new Date(shiftedTimestamp).toISOString().slice(0, 10);
+    }
+
+    // 【前提】mode は"move"|"resize-start"|"resize"。originalStartDate/originalEndDateは
+    //   ドラッグ開始時点の日付。deltaDaysはポインタ移動量から換算した日数（負値可）。
+    //   projectStartDate/projectEndDateはクランプ範囲（プロジェクトの期間）。
+    // 【処理】詳細設計書3.2.4「境界値の丸め処理（実機確認済み・アラート無し）」をそのまま
+    //   実装する：
+    //   ・move：開始日・終了日を同じ日数だけ平行移動（期間不変）。新開始日がプロジェクト開始日
+    //     より前になる場合は、期間を保ったままプロジェクト開始日にスナップ。新終了日が
+    //     プロジェクト終了日を超える場合はプロジェクト終了日でカット（2つの判定は独立で、
+    //     どちらも通知は出さず黙ってクランプする）。
+    //   ・resize-start：開始日のみ移動。新開始日が終了日を超える場合は終了日と同日にクランプ。
+    //     プロジェクト開始日より前にはできない。
+    //   ・resize：終了日のみ移動。新終了日が開始日を下回る場合は開始日と同日にクランプ。
+    //     プロジェクト終了日を超えることはできない。
+    // 【結果】クランプ済みの{startDate, endDate}を返す。
+    function calculateDraggedBarDates(mode, originalStartDate, originalEndDate, deltaDays, projectStartDate, projectEndDate) {
+      if (mode === "move") {
+        let newStartDate = shiftDateStringByDays(originalStartDate, deltaDays);
+        let newEndDate = shiftDateStringByDays(originalEndDate, deltaDays);
+        if (newStartDate < projectStartDate) {
+          const durationDays = Math.round(
+            (parseDateStringToUtcTimestamp(originalEndDate) - parseDateStringToUtcTimestamp(originalStartDate)) / MILLISECONDS_PER_DAY
+          );
+          newStartDate = projectStartDate;
+          newEndDate = shiftDateStringByDays(newStartDate, durationDays);
+        }
+        if (newEndDate > projectEndDate) {
+          newEndDate = projectEndDate;
+        }
+        return { startDate: newStartDate, endDate: newEndDate };
+      }
+
+      if (mode === "resize-start") {
+        let newStartDate = shiftDateStringByDays(originalStartDate, deltaDays);
+        if (newStartDate > originalEndDate) newStartDate = originalEndDate;
+        if (newStartDate < projectStartDate) newStartDate = projectStartDate;
+        return { startDate: newStartDate, endDate: originalEndDate };
+      }
+
+      let newEndDate = shiftDateStringByDays(originalEndDate, deltaDays);
+      if (newEndDate < originalStartDate) newEndDate = originalStartDate;
+      if (newEndDate > projectEndDate) newEndDate = projectEndDate;
+      return { startDate: originalStartDate, endDate: newEndDate };
+    }
+
     // 【前提】milestones は project.milestones（{name, date}の配列）。
-    // 【処理】日付を持つマイルストーンについて、タイムライン上のx座標（px）を計算する。
+    // 【処理】名前・日付の両方を持つマイルストーンについて、タイムライン上のx座標（px）を
+    //   計算する（詳細設計書3.11.1エラーバリエーション：名前が空の行は保存自体は成功するが
+    //   ガントチャート上には表示されない仕様のため、name不在の行を除外する）。
     // 【結果】{leftPx, name}[] を返す。
     function calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay) {
       return milestones
-        .filter((milestone) => Boolean(milestone.date))
+        .filter((milestone) => Boolean(milestone.date) && Boolean(milestone.name))
         .map((milestone) => ({
           leftPx: calculateDayOffsetFromTimelineStart(milestone.date, timelineStartDateString) * pixelsPerDay,
           name: milestone.name,
@@ -3473,7 +3583,13 @@
           const showLabel = hasChildren || geometry.widthPx > 60;
           const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${geometry.durationDays}日)` : "";
           const backgroundColor = schedule.color || "#2563EB";
-          return `<div class="gantt-bar${parentClass}${doneClass}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}</div>`;
+          // 【設計判断】掴み手（bar-lh/bar-rh）は子を持たない行（葉ノード）にしか付与しない
+          // （詳細設計書3.2.4：親行は移動のみ可能でリサイズ不可。親の日付は子から自動算出される
+          // ため、意図的にリサイズ不可としている）。
+          const resizeHandlesHtml = hasChildren
+            ? ""
+            : `<div class="gantt-bar-handle bar-lh" data-drag-mode="resize-start"></div><div class="gantt-bar-handle bar-rh" data-drag-mode="resize"></div>`;
+          return `<div class="gantt-bar${parentClass}${doneClass}" data-schedule-id="${escapeHtmlText(schedule.id)}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}${resizeHandlesHtml}</div>`;
         })
         .join("");
 
@@ -3636,13 +3752,15 @@
     }
 
     // 【前提】isLocked は現在のプロジェクトのロック状態。
-    // 【処理】ロック帯の表示・スケジュール追加ボタンの活性状態・ロックボタンの選択状態・
-    //   プロジェクト削除ボタンの表示有無をまとめて切り替える（基本設計書3.3節：
-    //   ロック中はスケジュール追加ボタンを無効化し、プロジェクト削除ボタンは非表示にする）。
+    // 【処理】ロック帯の表示・スケジュール追加／マイルストーンボタンの活性状態・
+    //   ロックボタンの選択状態・プロジェクト削除ボタンの表示有無をまとめて切り替える
+    //   （基本設計書3.3節：ロック中は「スケジュール追加」「マイルストーン」ボタンが
+    //   淡色化・無効化され、プロジェクト削除ボタンは非表示になる）。
     // 【結果】画面上のロック関連の見た目が状態に一致する。
     function applyLockState(isLocked) {
       document.getElementById("lockBand").hidden = !isLocked;
       document.getElementById("addScheduleButton").disabled = isLocked;
+      document.getElementById("milestoneButton").disabled = isLocked;
       document.getElementById("lockToggleButton").classList.toggle("is-active", isLocked);
       document.getElementById("deleteProjectButton").hidden = isLocked;
     }
@@ -4493,6 +4611,132 @@
       openProjectModal(currentProjectObject);
     }
 
+    // ===== M3：マイルストーン管理モーダル =====
+    // 【設計判断】名前・日付の行を保存ボタンを押すまでDBに反映しない「作業用コピー」
+    //   （milestoneModalDraftRows）を持つ。行の追加・削除のたびに#milestoneModalRowsContainerの
+    //   innerHTMLを丸ごと再構築するため、削除ボタン（動的に増減する要素）はイベント委譲で
+    //   拾う。再構築の直前には必ずsyncMilestoneModalDraftRowsFromDomでDOM上の現在値を
+    //   作業用コピーへ書き戻す（他の行への入力中の変更を、行追加・削除で消さないため）。
+
+    // 現在開いているマイルストーン管理モーダルの作業用コピー（{name, date}の配列）。
+    let milestoneModalDraftRows = [];
+
+    // 【前提】draftRows は milestoneModalDraftRows と同じ形の配列。
+    // 【処理】1行分＝名前入力・日付入力・削除ボタンのHTML文字列を、行インデックス付きで組み立てる
+    //   （基本設計書2.2節：「マイルストーン名」「日付」の入力行、行ごとに×削除ボタン）。
+    // 【結果】#milestoneModalRowsContainerの中身にそのまま入れられるHTML文字列を返す。
+    function renderMilestoneModalRowsToHtml(draftRows) {
+      return draftRows
+        .map(
+          (row, index) => `<div class="modal-milestone-row" data-row-index="${index}">
+            <input type="text" class="modal-milestone-name-input" placeholder="マイルストーン名" value="${escapeHtmlText(row.name)}">
+            <input type="date" class="modal-milestone-date-input" value="${escapeHtmlText(row.date)}" required>
+            <button type="button" class="wbs-icon-button" data-action="remove-milestone-row" title="削除">×</button>
+          </div>`
+        )
+        .join("");
+    }
+
+    // 【前提】draftRows は milestoneModalDraftRows と同じ形の配列。
+    // 【処理】M3モーダル全体（行一覧＋行追加ボタン＋キャンセル／保存）のHTML文字列を組み立てる
+    //   （モーダル・ダイアログ一覧M3）。
+    // 【結果】モーダルパネルにそのまま入れられるHTML文字列を返す。
+    function renderMilestoneModalToHtml(draftRows) {
+      return `
+        <h2>マイルストーン管理</h2>
+        <div id="milestoneModalRowsContainer">${renderMilestoneModalRowsToHtml(draftRows)}</div>
+        <button type="button" class="panel-add-button" id="addMilestoneRowButton">＋マイルストーンを追加</button>
+        <div class="modal-actions">
+          <button type="button" class="modal-button-secondary" id="milestoneModalCancelButton">キャンセル</button>
+          <button type="button" class="modal-button-primary" id="milestoneModalSaveButton">保存</button>
+        </div>
+      `;
+    }
+
+    // 【前提】なし。
+    // 【処理】現在表示されている各行のDOM入力値を読み取り、milestoneModalDraftRowsへ書き戻す。
+    //   行の追加・削除でHTMLを再構築する前に必ず呼ぶことで、未保存の入力を失わないようにする。
+    // 【結果】milestoneModalDraftRowsが画面表示と同じ内容になる。
+    function syncMilestoneModalDraftRowsFromDom() {
+      const rowElements = document.querySelectorAll("#milestoneModalRowsContainer .modal-milestone-row");
+      milestoneModalDraftRows = Array.from(rowElements).map((rowElement) => ({
+        name: rowElement.querySelector(".modal-milestone-name-input").value,
+        date: rowElement.querySelector(".modal-milestone-date-input").value,
+      }));
+    }
+
+    // 【前提】milestoneModalDraftRowsが最新であること（呼び出し前にsync済み）。
+    // 【処理】#milestoneModalRowsContainerの中身をmilestoneModalDraftRowsの内容で再構築する。
+    // 【結果】行一覧の表示が作業用コピーと一致する。
+    function rerenderMilestoneModalRows() {
+      document.getElementById("milestoneModalRowsContainer").innerHTML = renderMilestoneModalRowsToHtml(milestoneModalDraftRows);
+    }
+
+    // 【前提】なし。
+    // 【処理】現在の入力値をsyncしたうえで、末尾に空行（{name:"",date:""}）を追加して再描画する
+    //   （基本設計書2.2節：「＋マイルストーンを追加」で行を追加）。
+    // 【結果】行一覧に空行が1行増える。
+    function handleAddMilestoneRowButtonClick() {
+      syncMilestoneModalDraftRowsFromDom();
+      milestoneModalDraftRows.push({ name: "", date: "" });
+      rerenderMilestoneModalRows();
+    }
+
+    // 【前提】rowIndex は削除対象行の、現在の表示順でのインデックス。
+    // 【処理】現在の入力値をsyncしたうえで、指定インデックスの行を取り除いて再描画する。
+    // 【結果】行一覧から指定行が消える。
+    function handleRemoveMilestoneRowButtonClick(rowIndex) {
+      syncMilestoneModalDraftRowsFromDom();
+      milestoneModalDraftRows.splice(rowIndex, 1);
+      rerenderMilestoneModalRows();
+    }
+
+    // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること。
+    // 【処理】現在の入力値をDOMから読み取り、project.milestonesを丸ごと置き換えてaddProjectで
+    //   保存する（詳細設計書3.11.1：1回の保存で複数行の追加・削除をまとめて反映。差分ではなく
+    //   丸ごと置換）。名前が空の行があってもエラーにはしない（同節エラーバリエーション：
+    //   保存自体は成功し、該当行はガントチャート上に表示されないだけ）。
+    //   milestonesはPROJECT_LOGGED_FIELD_LABELSの対象外のため、この保存では変更履歴は
+    //   記録されない（詳細設計書3.11.1に変更履歴への言及が無いことに合わせる）。
+    // 【結果】保存後、モーダルを閉じてガントパネルを再描画し、
+    //   トースト「マイルストーンを保存しました」を表示する。
+    async function handleMilestoneModalSaveButtonClick() {
+      syncMilestoneModalDraftRowsFromDom();
+      const updatedProject = {
+        ...currentProjectObject,
+        milestones: milestoneModalDraftRows.map((row) => ({ name: row.name, date: row.date })),
+      };
+      await addProject(updatedProject);
+      currentProjectObject = updatedProject;
+      closeModal();
+      await refreshGanttPanel(currentSelectedProjectId);
+      showToast("マイルストーンを保存しました");
+    }
+
+    // 【前提】currentProjectObjectが設定済み（プロジェクト選択済み）であること
+    //   （マイルストーンボタン自体が未選択時・ロック中はdisabledのため、通常はここに
+    //   到達する時点で選択済み）。
+    // 【処理】現在のproject.milestonesを作業用コピーへ複製してモーダルを開き、
+    //   行追加・削除（イベント委譲）・キャンセル・保存にイベントを登録する。
+    // 【結果】マイルストーン管理モーダルが操作可能な状態で表示される。
+    function openMilestoneModal() {
+      if (!currentProjectObject) {
+        window.alert("先にプロジェクトを選択してください。");
+        return;
+      }
+      milestoneModalDraftRows = currentProjectObject.milestones.map((milestone) => ({ ...milestone }));
+      openModal(renderMilestoneModalToHtml(milestoneModalDraftRows));
+      document.getElementById("milestoneModalCancelButton").addEventListener("click", closeModal);
+      document.getElementById("addMilestoneRowButton").addEventListener("click", handleAddMilestoneRowButtonClick);
+      document.getElementById("milestoneModalSaveButton").addEventListener("click", handleMilestoneModalSaveButtonClick);
+      document.getElementById("milestoneModalRowsContainer").addEventListener("click", (event) => {
+        const removeButton = event.target.closest('[data-action="remove-milestone-row"]');
+        if (!removeButton) return;
+        const rowElement = removeButton.closest(".modal-milestone-row");
+        handleRemoveMilestoneRowButtonClick(Number(rowElement.dataset.rowIndex));
+      });
+    }
+
     // 3年後の判定はうるう年を厳密に数えず、365日×3年分の日数で近似する（実務上十分な簡略化）。
     const THREE_YEARS_IN_MILLISECONDS = 3 * 365 * MILLISECONDS_PER_DAY;
 
@@ -5034,6 +5278,169 @@
       showToast("並び順を変更しました");
     }
 
+    // ===== ガントバーのドラッグによる日程変更（詳細設計書3.2.4） =====
+    // 【設計判断】マインドマップノードのドラッグ（pointerdown/pointermove/pointerup、
+    //   handleMindmapNodePointerDown等）と同じ実装パターンを使う。ドラッグ中は見た目
+    //   （left/width）だけを更新し、DBへの保存はpointerup時の1回だけ行う。
+    //   3モード（詳細設計書3.2.4）：
+    //   ・move：バー本体をつかんだ場合。開始日・終了日を同じ日数だけ平行移動（期間不変）。
+    //   ・resize-start：左端の掴み手（bar-lh）をつかんだ場合。開始日のみ変更。
+    //   ・resize：右端の掴み手（bar-rh）をつかんだ場合。終了日のみ変更。
+    //   掴み手は葉ノード（子を持たない行）にしか無いため、親行（子を持つ行）は常にmoveのみになる。
+    //   【設計判断：親行をmoveした場合の子孫の扱い】親の日付は子から自動算出される仕様
+    //   （3.2.3・syncAncestorDates）のため、親バーだけを動かしても次に子が変わった瞬間に
+    //   syncAncestorDatesで元へ戻ってしまい操作が意味を持たない。詳細設計書はこの点を明記
+    //   していないが、データの整合性を保つため、親行をmoveした場合は配下の子孫スケジュールも
+    //   同じ日数だけ平行移動する（さらに上の祖先の日付はsyncAncestorDatesで再計算する）。
+
+    // ドラッグ中のスケジュールid・モード。ドラッグしていない時はnull。
+    let draggedBarScheduleId = null;
+    let draggedBarMode = null; // "move" | "resize-start" | "resize"
+    let barDragStartPointerX = 0;
+    let barDragStartStartDate = "";
+    let barDragStartEndDate = "";
+    let barDragPixelsPerDay = 0;
+
+    // 【前提】rootScheduleId は起点スケジュールのid。allSchedules は同一プロジェクト内の
+    //   全スケジュール。
+    // 【処理】parentIdをたどり、rootScheduleIdの子孫（子・孫）を幅優先で収集する
+    //   （deleteScheduleCascadeと同じ考え方。root自身は含めない）。
+    // 【結果】子孫スケジュールオブジェクトの配列を返す（子孫がなければ空配列）。
+    function collectScheduleDescendants(rootScheduleId, allSchedules) {
+      const childSchedulesByParentId = new Map();
+      for (const schedule of allSchedules) {
+        if (schedule.parentId === null || schedule.parentId === undefined) continue;
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
+      const descendants = [];
+      let frontier = childSchedulesByParentId.get(rootScheduleId) || [];
+      while (frontier.length > 0) {
+        descendants.push(...frontier);
+        const nextFrontier = [];
+        for (const node of frontier) {
+          nextFrontier.push(...(childSchedulesByParentId.get(node.id) || []));
+        }
+        frontier = nextFrontier;
+      }
+      return descendants;
+    }
+
+    // 【前提】event はガントバー（.gantt-bar）またはその掴み手（.gantt-bar-handle）上での
+    //   pointerdownイベント。scheduleId はそのバーが表すスケジュールid。mode は
+    //   "move"|"resize-start"|"resize"。barElement は実際にポインタを捕捉する要素（.gantt-bar
+    //   自身。掴み手が対象でも、見た目の更新はバー本体に対して行うため）。
+    // 【処理】ロック中は開始しない（詳細設計書3.1.3：個別関数側でのロックチェック）。
+    //   それ以外は、ドラッグ開始時点のポインタ座標・対象スケジュールの開始日・終了日・
+    //   現在の表示粒度のpixelsPerDayを記録する（以降のpointermoveで差分計算するための基準点）。
+    // 【結果】ドラッグ状態が開始される（実際の見た目更新はpointermoveハンドラが行う）。
+    function handleBarPointerDown(event, scheduleId, mode, barElement) {
+      if (currentProjectObject?.locked) {
+        showToast("ロック中のため編集できません");
+        return;
+      }
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+      draggedBarScheduleId = scheduleId;
+      draggedBarMode = mode;
+      barDragStartPointerX = event.clientX;
+      barDragStartStartDate = scheduleRow.schedule.startDate;
+      barDragStartEndDate = scheduleRow.schedule.endDate;
+      barDragPixelsPerDay = GRANULARITY_PIXELS_PER_DAY[currentGranularity];
+      barElement.classList.add("is-bar-dragging");
+      barElement.setPointerCapture(event.pointerId);
+      event.stopPropagation();
+    }
+
+    // 【前提】draggedBarScheduleIdが設定済み（ドラッグ中）であること。
+    // 【処理】ポインタの移動量を「移動日数」に変換し（barDragPixelsPerDayで割って四捨五入）、
+    //   calculateDraggedBarDatesでモードに応じた新しい開始日・終了日（クランプ済み）を求め、
+    //   バーの見た目（left/width）だけを更新する。DBへの保存はしない。
+    // 【結果】バーの見た目がポインタの位置に追従する。
+    function handleBarPointerMove(event) {
+      if (!draggedBarScheduleId) return;
+      const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${draggedBarScheduleId}"]`);
+      if (!barElement) return;
+
+      const deltaDays = Math.round((event.clientX - barDragStartPointerX) / barDragPixelsPerDay);
+      const { startDate, endDate } = calculateDraggedBarDates(
+        draggedBarMode,
+        barDragStartStartDate,
+        barDragStartEndDate,
+        deltaDays,
+        currentProjectObject.startDate,
+        currentProjectObject.endDate
+      );
+      const geometry = calculateBarGeometry({ startDate, endDate }, currentTimelineStartDateString, barDragPixelsPerDay);
+      if (!geometry) return;
+      barElement.style.left = `${geometry.leftPx}px`;
+      barElement.style.width = `${geometry.widthPx}px`;
+    }
+
+    // 【前提】ドラッグ中であること。
+    // 【処理】最終的な開始日・終了日を確定し、ドラッグ開始時点と変わっていなければ
+    //   （＝実質クリックだった場合）何も保存せず見た目だけ元に戻す。変わっていれば
+    //   addScheduleで保存する。対象が親行（子を持つ行）の場合は、実際に確定した開始日の
+    //   移動量ぶん、配下の子孫スケジュールも平行移動して保存する（本セクション冒頭の設計判断）。
+    //   親（parentId）を持つ場合はsyncAncestorDatesで祖先の日付を再計算する（3.2.3）。
+    // 【結果】DBが更新され、ガントパネルが再描画される。実際に日付が変わった場合のみ
+    //   トースト「スケジュールを更新しました」を表示する（詳細設計書3.2.4）。
+    async function handleBarPointerUp(event) {
+      if (!draggedBarScheduleId) return;
+      const scheduleId = draggedBarScheduleId;
+      const mode = draggedBarMode;
+      draggedBarScheduleId = null;
+      draggedBarMode = null;
+
+      const barElement = document.querySelector(`.gantt-bar[data-schedule-id="${scheduleId}"]`);
+      if (barElement) barElement.classList.remove("is-bar-dragging");
+
+      const scheduleRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
+      if (!scheduleRow) return;
+
+      const deltaDays = Math.round((event.clientX - barDragStartPointerX) / barDragPixelsPerDay);
+      const { startDate, endDate } = calculateDraggedBarDates(
+        mode,
+        barDragStartStartDate,
+        barDragStartEndDate,
+        deltaDays,
+        currentProjectObject.startDate,
+        currentProjectObject.endDate
+      );
+
+      if (startDate === barDragStartStartDate && endDate === barDragStartEndDate) {
+        await refreshGanttPanel(currentSelectedProjectId);
+        return;
+      }
+
+      const updatedSchedule = { ...scheduleRow.schedule, startDate, endDate };
+      await addSchedule(updatedSchedule);
+
+      if (scheduleRow.hasChildren && mode === "move") {
+        const actualStartDeltaDays = Math.round(
+          (parseDateStringToUtcTimestamp(startDate) - parseDateStringToUtcTimestamp(barDragStartStartDate)) / MILLISECONDS_PER_DAY
+        );
+        const allSchedules = currentScheduleTreeRows.map((row) => row.schedule);
+        const descendants = collectScheduleDescendants(scheduleId, allSchedules);
+        for (const descendant of descendants) {
+          await addSchedule({
+            ...descendant,
+            startDate: shiftDateStringByDays(descendant.startDate, actualStartDeltaDays),
+            endDate: shiftDateStringByDays(descendant.endDate, actualStartDeltaDays),
+          });
+        }
+      }
+
+      if (updatedSchedule.parentId !== null && updatedSchedule.parentId !== undefined) {
+        await syncAncestorDates(updatedSchedule.parentId);
+      }
+
+      await refreshGanttPanel(currentSelectedProjectId);
+      showToast("スケジュールを更新しました");
+    }
+
     // 【前提】scheduleId は削除したいスケジュールのid。
     // 【処理】子の有無でC2（子なし）／C3（子あり・サブタスクごと削除）の確認文言を切り替えて
     //   confirm()し、OKならdeleteScheduleCascadeで削除する（連鎖削除・コメント削除・
@@ -5055,6 +5462,25 @@
       await deleteScheduleCascade(scheduleId, currentSelectedProjectId);
       await refreshGanttPanel(currentSelectedProjectId);
       showToast("削除しました");
+    }
+
+    // 【前提】isToggleAllButtonShowingCloseLabelが現在の表示ラベルを表す（true＝「全て閉じる」）。
+    // 【処理】現在のラベルに応じて、子を持つ全スケジュールをcollapsedScheduleIdsへ追加する（閉じる）
+    //   か、collapsedScheduleIds自体を空にする（開く）かのどちらかを行い、フラグを反転させて
+    //   ボタンのラベルを入れ替える。個々の行が現在開いているか閉じているかは判定材料にしない
+    //   （基本設計書2.2節：ボタン自身の状態フラグをそのまま反転させるだけの単純な実装）。
+    // 【結果】WBS・ガント両パネルが再描画され、ボタンのラベルが入れ替わる。
+    function handleToggleAllScheduleRowsButtonClick() {
+      if (isToggleAllButtonShowingCloseLabel) {
+        for (const row of currentScheduleTreeRows) {
+          if (row.hasChildren) collapsedScheduleIds.add(row.schedule.id);
+        }
+      } else {
+        collapsedScheduleIds.clear();
+      }
+      isToggleAllButtonShowingCloseLabel = !isToggleAllButtonShowingCloseLabel;
+      document.getElementById("toggleAllScheduleRowsButton").textContent = isToggleAllButtonShowingCloseLabel ? "全て閉じる" : "全て開く";
+      rerenderWbsAndGanttFromCache();
     }
 
     // 【前提】action は "toggle-collapse" | "move-up" | "move-down" | "add-child" | "edit" | "delete"。
@@ -5614,6 +6040,17 @@
       });
       document.addEventListener("pointermove", handleMindmapNodePointerMove);
       document.addEventListener("pointerup", handleMindmapNodePointerUp);
+      // ガントバーのドラッグによる日程変更。掴んだ場所（掴み手か本体か）でモードを決める
+      // （マインドマップと同じ理由でpointermove/pointerupはdocument側で拾う）。
+      document.getElementById("ganttPanelBody").addEventListener("pointerdown", (event) => {
+        const barElement = event.target.closest(".gantt-bar[data-schedule-id]");
+        if (!barElement) return;
+        const handleElement = event.target.closest(".gantt-bar-handle");
+        const mode = handleElement ? handleElement.dataset.dragMode : "move";
+        handleBarPointerDown(event, barElement.dataset.scheduleId, mode, barElement);
+      });
+      document.addEventListener("pointermove", handleBarPointerMove);
+      document.addEventListener("pointerup", handleBarPointerUp);
       // マインドマップの右クリックメニュー。
       document.getElementById("mindmapPanelBody").addEventListener("contextmenu", (event) => {
         const node = event.target.closest(".mindmap-node");
@@ -5684,6 +6121,7 @@
       });
       document.getElementById("lockToggleButton").addEventListener("click", handleLockToggleButtonClick);
       document.getElementById("todayButton").addEventListener("click", handleTodayButtonClick);
+      document.getElementById("toggleAllScheduleRowsButton").addEventListener("click", handleToggleAllScheduleRowsButtonClick);
       for (const granularityButton of document.querySelectorAll("[data-granularity]")) {
         granularityButton.addEventListener("click", () => handleGranularityButtonClick(granularityButton.dataset.granularity, granularityButton));
       }
@@ -5695,6 +6133,7 @@
         outOfScopeButton.addEventListener("click", handleOutOfScopeButtonClick);
       }
       document.getElementById("editProjectButton").addEventListener("click", handleEditProjectButtonClick);
+      document.getElementById("milestoneButton").addEventListener("click", openMilestoneModal);
       // モーダル外側（オーバーレイ自身）をクリックしたときだけ閉じる
       // （モーダル・ダイアログ一覧2.3節：「モーダル外側をクリックすると閉じる」）。
       document.getElementById("modalOverlay").addEventListener("click", (event) => {
