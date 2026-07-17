@@ -463,6 +463,13 @@
       color: var(--color-danger);
     }
 
+    /* 追加実装仕様書1章：祝日の背景色（薄橙）。土＝薄青・日＝薄赤と同じ考え方で、
+       祝日は橙系の色（お手本ganttforge.htmlの.hc.hol/.ds.holに準拠）にする。 */
+    .gantt-day-column-header.is-holiday {
+      background: rgba(234, 88, 12, .12);
+      color: #C2410C;
+    }
+
     .gantt-body {
       position: relative;
       cursor: grab;
@@ -499,6 +506,10 @@
 
     .gantt-day-column-bg.is-sunday {
       background: rgba(220, 38, 38, .05);
+    }
+
+    .gantt-day-column-bg.is-holiday {
+      background: rgba(234, 88, 12, .08);
     }
 
     /* 週/1ヶ月/3ヶ月表示では土日という概念が意味を持たないため、縞模様で列の区切りだけを示す。 */
@@ -3192,7 +3203,9 @@
     // 【前提】startDateString <= endDateString（"YYYY-MM-DD"形式）であること。
     //   プロジェクトのendDateがstartDateより前という既知の非整合（基本設計書1.3節No.1相当の
     //   プロジェクト側バリデーション無し仕様）の場合でも、最低1日分は描画できるようにする。
-    // 【処理】startからendまでの日数分、各日の情報（日付文字列・年月・曜日・週末か）を列挙する。
+    // 【処理】startからendまでの日数分、各日の情報（日付文字列・年月・曜日・日種別）を列挙する。
+    //   日種別（dayType）はcalculateDayTypeが返す「祝日 > 日曜 > 土曜 > 平日」の判定結果
+    //   （追加実装仕様書1章：土日だけでなく祝日もタイムライン背景色の判定に使うため）。
     // 【結果】タイムライン列として左から順に描画できる配列を返す。
     function buildGanttTimelineDays(startDateString, endDateString) {
       const startTimestamp = parseDateStringToUtcTimestamp(startDateString);
@@ -3201,14 +3214,14 @@
 
       const timelineDays = [];
       for (let dayOffset = 0; dayOffset < totalDayCount; dayOffset++) {
-        const currentDate = new Date(startTimestamp + dayOffset * MILLISECONDS_PER_DAY);
-        const dayOfWeek = currentDate.getUTCDay();
+        const currentTimestamp = startTimestamp + dayOffset * MILLISECONDS_PER_DAY;
+        const currentDate = new Date(currentTimestamp);
+        const dateString = formatUtcTimestampToDateString(currentTimestamp);
         timelineDays.push({
           year: currentDate.getUTCFullYear(),
           month: currentDate.getUTCMonth() + 1,
           dayOfMonth: currentDate.getUTCDate(),
-          isSaturday: dayOfWeek === 6,
-          isSunday: dayOfWeek === 0,
+          dayType: calculateDayType(dateString, currentDate.getUTCDay()),
         });
       }
       return timelineDays;
@@ -3221,6 +3234,93 @@
       const targetTimestamp = parseDateStringToUtcTimestamp(targetDateString);
       const startTimestamp = parseDateStringToUtcTimestamp(timelineStartDateString);
       return Math.round((targetTimestamp - startTimestamp) / MILLISECONDS_PER_DAY);
+    }
+
+    // 【前提】utcTimestamp は parseDateStringToUtcTimestampと同じ基準（UTC深夜0時）のミリ秒値。
+    // 【処理】parseDateStringToUtcTimestampの逆変換として、"YYYY-MM-DD"形式の文字列を組み立てる。
+    // 【結果】UTC基準の日付文字列を返す。
+    function formatUtcTimestampToDateString(utcTimestamp) {
+      const date = new Date(utcTimestamp);
+      const padToTwoDigits = (value) => String(value).padStart(2, "0");
+      return `${date.getUTCFullYear()}-${padToTwoDigits(date.getUTCMonth() + 1)}-${padToTwoDigits(date.getUTCDate())}`;
+    }
+
+    // ===== 追加実装仕様書1章：営業日・祝日カレンダー =====
+    // 【設計判断：竹（忠実再現）】お手本ganttforge.html 1435〜1456行目の祝日データを
+    //   そのまま踏襲し、2024年〜2027年分のみをハードコードする。2028年以降の日付は
+    //   このSetに含まれないため祝日として扱われず、土日以外は平日扱いになる。
+    //   これは既知の制限であり、無理に年数を拡張しない（追加実装仕様書1.1節の方針）。
+    const JAPANESE_PUBLIC_HOLIDAYS = new Set([
+      // 2024年
+      "2024-01-01", "2024-01-08", "2024-02-11", "2024-02-12", "2024-02-23",
+      "2024-03-20", "2024-04-29", "2024-05-03", "2024-05-04", "2024-05-05", "2024-05-06",
+      "2024-07-15", "2024-08-11", "2024-08-12", "2024-09-16", "2024-09-22", "2024-09-23",
+      "2024-10-14", "2024-11-03", "2024-11-04", "2024-11-23",
+      // 2025年
+      "2025-01-01", "2025-01-13", "2025-02-11", "2025-02-23", "2025-02-24",
+      "2025-03-20", "2025-04-29", "2025-05-03", "2025-05-04", "2025-05-05", "2025-05-06",
+      "2025-07-21", "2025-08-11", "2025-09-15", "2025-09-21", "2025-09-22", "2025-09-23",
+      "2025-10-13", "2025-11-03", "2025-11-23", "2025-11-24",
+      // 2026年
+      "2026-01-01", "2026-01-12", "2026-02-11", "2026-02-23",
+      "2026-03-20", "2026-04-29", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06",
+      "2026-07-20", "2026-08-11", "2026-09-21", "2026-09-22", "2026-09-23",
+      "2026-10-12", "2026-11-03", "2026-11-23",
+      // 2027年
+      "2027-01-01", "2027-01-11", "2027-02-11", "2027-02-23",
+      "2027-03-21", "2027-03-22", "2027-04-29", "2027-05-03", "2027-05-04", "2027-05-05",
+      "2027-07-19", "2027-08-11", "2027-09-20", "2027-09-21", "2027-09-23",
+      "2027-10-11", "2027-11-03", "2027-11-23",
+    ]);
+
+    // 【前提】dateString は "YYYY-MM-DD" 形式。
+    // 【処理】JAPANESE_PUBLIC_HOLIDAYSに含まれるかを判定する。
+    // 【結果】祝日ならtrue。
+    function isJapaneseHoliday(dateString) {
+      return JAPANESE_PUBLIC_HOLIDAYS.has(dateString);
+    }
+
+    // 【前提】dateString は "YYYY-MM-DD" 形式。dayOfWeekNumber は0(日)〜6(土)。
+    // 【処理】優先順位「祝日 > 日曜 > 土曜 > 平日」で1つの日種別を判定する
+    //   （追加実装仕様書1.2節。用途：タイムライン背景色の判定＝土は薄青／日は薄赤／祝は薄橙）。
+    // 【結果】"holiday" | "sunday" | "saturday" | null を返す。
+    function calculateDayType(dateString, dayOfWeekNumber) {
+      if (isJapaneseHoliday(dateString)) return "holiday";
+      if (dayOfWeekNumber === 0) return "sunday";
+      if (dayOfWeekNumber === 6) return "saturday";
+      return null;
+    }
+
+    // 【前提】dayType は calculateDayTypeの戻り値。
+    // 【処理】タイムライン見出し・グリッド背景の両方で共通して使う、日種別→CSSクラス名の
+    //   対応表（同じ変換を2箇所に重複させないための単純なラッパー）。
+    // 【結果】対応するCSSクラス名。dayTypeがnull（平日）なら空文字列。
+    function calculateDayTypeBackgroundClassName(dayType) {
+      if (dayType === "holiday") return "is-holiday";
+      if (dayType === "sunday") return "is-sunday";
+      if (dayType === "saturday") return "is-saturday";
+      return "";
+    }
+
+    // 【前提】startDateString <= endDateString（"YYYY-MM-DD"形式）。どちらかが空、または
+    //   startDateStringがendDateStringより後の場合は0を返す（呼び出し側の未入力・不整合を
+    //   許容するため、エラーにはしない）。
+    // 【処理】開始日から終了日まで1日ずつ走査し、土日・祝日を除いた日数を数える
+    //   （追加実装仕様書1.3節：お手本と同じ単純な走査方式でよい）。
+    // 【結果】営業日数（整数）。
+    function calculateBusinessDayCount(startDateString, endDateString) {
+      if (!startDateString || !endDateString) return 0;
+      const startTimestamp = parseDateStringToUtcTimestamp(startDateString);
+      const endTimestamp = parseDateStringToUtcTimestamp(endDateString);
+      if (startTimestamp > endTimestamp) return 0;
+
+      let businessDayCount = 0;
+      for (let timestamp = startTimestamp; timestamp <= endTimestamp; timestamp += MILLISECONDS_PER_DAY) {
+        const dayOfWeekNumber = new Date(timestamp).getUTCDay();
+        const dateString = formatUtcTimestampToDateString(timestamp);
+        if (calculateDayType(dateString, dayOfWeekNumber) === null) businessDayCount++;
+      }
+      return businessDayCount;
     }
 
     // ===== H4：Excel出力（exportExcel） =====
@@ -3814,7 +3914,8 @@
       const level2Html = level2Groups
         .map((group) => {
           const firstDay = timelineDays[group.startIndex];
-          const weekendClass = granularity === "day" ? (firstDay.isSaturday ? " is-saturday" : firstDay.isSunday ? " is-sunday" : "") : "";
+          const dayTypeClassName = granularity === "day" ? calculateDayTypeBackgroundClassName(firstDay.dayType) : "";
+          const weekendClass = dayTypeClassName ? ` ${dayTypeClassName}` : "";
           return `<div class="gantt-day-column-header${weekendClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px">${escapeHtmlText(group.label)}</div>`;
         })
         .join("");
@@ -3862,7 +3963,7 @@
           const firstDay = timelineDays[group.startIndex];
           let backgroundClass = "";
           if (granularity === "day") {
-            backgroundClass = firstDay.isSaturday ? "is-saturday" : firstDay.isSunday ? "is-sunday" : "";
+            backgroundClass = calculateDayTypeBackgroundClassName(firstDay.dayType);
           } else if (groupIndex % 2 === 1) {
             backgroundClass = "is-alt-period";
           }
@@ -3870,6 +3971,19 @@
           return `<div class="gantt-day-column-bg ${backgroundClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px"></div>`;
         })
         .join("");
+
+      // 【前提】scheduleTreeRows はbuildScheduleTreeRowsの戻り値（全行がフラットに並ぶ）。
+      // 【処理】親行のバーラベルに使う「直接の子の営業日数合計」を求めるため、
+      //   parentId→直接の子スケジュール配列のMapを組み立てる（追加実装仕様書1.3節：
+      //   お手本1938行目と同様、直接の子のみを合計し孫以下は加算しない）。
+      const childSchedulesByParentId = new Map();
+      for (const { schedule } of scheduleTreeRows) {
+        if (schedule.parentId === null || schedule.parentId === undefined) continue;
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
 
       const barsHtml = scheduleTreeRows
         .map(({ schedule, hasChildren }, rowIndex) => {
@@ -3883,7 +3997,18 @@
           const doneClass = schedule.taskStatus === "done" ? " is-done-status" : "";
           const parentClass = hasChildren ? " is-parent-bar" : "";
           const showLabel = hasChildren || geometry.widthPx > 60;
-          const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${geometry.durationDays}日)` : "";
+          // 【設計判断】親行のラベルだけは「直接の子の営業日数合計」を表示する
+          //   （追加実装仕様書1.3節：親自身の日数ではなく、子タスク合計日数を表示する箇所）。
+          //   葉（子なし）行のラベルはお手本と異なり従来通り暦日数のまま維持する
+          //   （本書に明記されていない箇所を変更しないため）。
+          const parentChildBusinessDayTotal = hasChildren
+            ? (childSchedulesByParentId.get(schedule.id) || []).reduce(
+                (total, childSchedule) => total + calculateBusinessDayCount(childSchedule.startDate, childSchedule.endDate),
+                0
+              )
+            : 0;
+          const labelDayCount = hasChildren ? parentChildBusinessDayTotal : geometry.durationDays;
+          const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${labelDayCount}日)` : "";
           const backgroundColor = schedule.color || "#2563EB";
           // 【設計判断】掴み手（bar-lh/bar-rh）は子を持たない行（葉ノード）にしか付与しない
           // （詳細設計書3.2.4：親行は移動のみ可能でリサイズ不可。親の日付は子から自動算出される
@@ -3891,7 +4016,13 @@
           const resizeHandlesHtml = hasChildren
             ? ""
             : `<div class="gantt-bar-handle bar-lh" data-drag-mode="resize-start"></div><div class="gantt-bar-handle bar-rh" data-drag-mode="resize"></div>`;
-          return `<div class="gantt-bar${parentClass}${doneClass}" data-schedule-id="${escapeHtmlText(schedule.id)}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}${resizeHandlesHtml}</div>`;
+          // 【前提】お手本ganttforge.html 1936行目と同じ書式（追加実装仕様書1.3節）。
+          // 【処理】営業日数・ステータス・メモ（あれば）をネイティブtitle属性用の文字列に組み立てる。
+          const scheduleBusinessDayCount = calculateBusinessDayCount(schedule.startDate, schedule.endDate);
+          const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
+          const notesSuffix = schedule.notes ? `\n\n${schedule.notes}` : "";
+          const barTitleText = `${schedule.name}\n${schedule.startDate} 〜 ${schedule.endDate}（${scheduleBusinessDayCount}営業日）\nステータス: ${statusLabel}${notesSuffix}`;
+          return `<div class="gantt-bar${parentClass}${doneClass}" data-schedule-id="${escapeHtmlText(schedule.id)}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}" title="${escapeHtmlText(barTitleText)}">${labelText}${resizeHandlesHtml}</div>`;
         })
         .join("");
 
