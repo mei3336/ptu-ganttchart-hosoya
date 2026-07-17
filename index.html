@@ -44,8 +44,11 @@
       --radius-standard: 8px;
       --gantt-row-height: 44px;
       --gantt-header-height: 42px;
-      --timeline-header-height: 82px;
-      --milestone-marker-height: 20px;
+      /* 対応表No.42（追加実装仕様書4章）：マイルストーンのひし形＋名前ラベルは、月・日の
+         見出し行（合計82px＝40px＋42px）の上に専用の帯として追加するため、
+         タイムラインヘッダー全体の高さはその帯ぶんだけ伸びる。 */
+      --milestone-band-height: 24px;
+      --timeline-header-height: calc(var(--milestone-band-height) + 82px);
       --wbs-panel-width: 520px;
       --header-primary-height: 52px;
       --header-secondary-height: 34px;
@@ -390,7 +393,7 @@
 
     .gantt-month-label {
       position: absolute;
-      top: 0;
+      top: var(--milestone-band-height);
       height: 40px;
       display: flex;
       align-items: center;
@@ -402,9 +405,45 @@
       border-bottom: 1px solid var(--color-border);
     }
 
+    /* 対応表No.42（追加実装仕様書4章）：マイルストーンのひし形＋名前ラベルを表示する専用の帯。
+       バーが並ぶ行（.gantt-body）とは別レイヤーとして、月・日の見出し行の「上」に置く。 */
+    .gantt-milestone-band {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: var(--milestone-band-height);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .gantt-milestone-band-marker {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transform: translateX(-5px);
+    }
+
+    .gantt-milestone-band-diamond {
+      width: 10px;
+      height: 10px;
+      background: #D97706;
+      border-radius: 1px;
+      transform: rotate(45deg);
+      flex-shrink: 0;
+    }
+
+    .gantt-milestone-band-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #D97706;
+      white-space: nowrap;
+    }
+
     .gantt-day-column-header {
       position: absolute;
-      top: 40px;
+      top: calc(var(--milestone-band-height) + 40px);
       height: 42px;
       display: flex;
       align-items: center;
@@ -527,12 +566,15 @@
       opacity: .55;
     }
 
+    /* 追加実装仕様書4章：マイルストーンの縦のガイド線。ひし形＋名前ラベルは
+       .gantt-milestone-band（タイムラインヘッダー側の専用帯）に移したため、ここでは
+       .gantt-body内を貫く縦線のみを描画する（点線→オレンジの実線に変更）。 */
     .gantt-milestone-marker {
       position: absolute;
       top: 0;
       bottom: 0;
       width: 0;
-      border-left: 1px dashed var(--color-border-dark);
+      border-left: 2px solid #D97706;
     }
 
     /* 「今日」を示す縦のハイライト線。マイルストーン線と同じくtop:0;bottom:0で
@@ -544,60 +586,6 @@
       width: 2px;
       background: var(--color-accent);
       z-index: 1;
-    }
-
-    .gantt-milestone-diamond {
-      position: absolute;
-      top: 6px;
-      width: var(--milestone-marker-height);
-      height: var(--milestone-marker-height);
-      background: #D97706;
-      transform: translateX(-10px) rotate(45deg);
-      border-radius: 2px;
-    }
-
-    /* UI差分表No.55：マイルストーンのカスタムツールチップ。ブラウザ標準title属性の代わりに
-       data-tooltip属性＋CSSの::after（content:attr()）で、矢印付きの吹き出しを実装する
-       （JS不要）。既定は非表示（opacity:0;visibility:hidden）にし、
-       .gantt-milestone-marker:hoverでフェードインさせる。 */
-    .gantt-milestone-marker::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      top: -8px;
-      left: -10px;
-      transform: translate(-50%, -100%);
-      background: #292524;
-      color: var(--color-white);
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      white-space: nowrap;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity .15s ease;
-      pointer-events: none;
-      z-index: 2;
-    }
-
-    .gantt-milestone-marker::before {
-      content: "";
-      position: absolute;
-      top: -8px;
-      left: -10px;
-      transform: translate(-50%, -100%) translateY(100%);
-      border: 4px solid transparent;
-      border-top-color: #292524;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity .15s ease;
-      pointer-events: none;
-      z-index: 2;
-    }
-
-    .gantt-milestone-marker:hover::after,
-    .gantt-milestone-marker:hover::before {
-      opacity: 1;
-      visibility: visible;
     }
 
     /* ===== カンバン（タスク管理） ===== */
@@ -3765,12 +3753,24 @@
     }
 
     // 【前提】timelineDays は buildGanttTimelineDays の戻り値。granularity は表示粒度。
+    //   milestones は project.milestones。timelineStartDateString は基準日（1日目の日付）。
     // 【処理】buildGanttTimelineHeaderGroupsで1段目・2段目の見出しグループを求め、
     //   それぞれをHTML文字列化する（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
     //   1段目40px＋2段目42px相当として配分）。土日の色分けは「日」表示のときのみ意味を持つ。
+    // 【設計判断：マイルストーンのひし形＋名前ラベルは月・日の見出し行の「上」に専用の帯として
+    //   描画する（追加実装仕様書4章）】ガント本体（.gantt-body）内はバーが並ぶレイヤーのため、
+    //   そこにひし形を重ねると視認性が落ちる。ヘッダーと本体は同じ横スクロールコンテナの中に
+    //   あるため、calculateMilestoneMarkerPositionsが返すleftPxはどちらでもそのまま使える。
     // 【結果】gantt-timeline-headerのHTML文字列を返す。
-    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) {
+    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString) {
       const { level1Groups, level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
+
+      const milestoneBandHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
+        .map(
+          (marker) =>
+            `<div class="gantt-milestone-band-marker" style="left:${marker.leftPx}px"><div class="gantt-milestone-band-diamond"></div><span class="gantt-milestone-band-label">${escapeHtmlText(marker.name)}</span></div>`
+        )
+        .join("");
 
       const level1Html = level1Groups
         .map(
@@ -3788,7 +3788,7 @@
         .join("");
 
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${level1Html}${level2Html}</div>`;
+      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px"><div class="gantt-milestone-band">${milestoneBandHtml}</div>${level1Html}${level2Html}</div>`;
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
@@ -3865,11 +3865,10 @@
 
       // 【前提】マイルストーン線・今日マーカーはどちらも「left位置だけ決めて、高さは
       //   CSSのtop:0;bottom:0に任せる」ため、ここでは高さ(height)を指定しない。
+      // 【設計判断】ひし形＋名前ラベルはrenderGanttTimelineHeaderToHtml側の専用帯
+      //   （.gantt-milestone-band）に描画するため、ここでは縦のガイド線のみを描画する。
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
-        .map(
-          (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" data-tooltip="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
-        )
+        .map((marker) => `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px"></div>`)
         .join("");
 
       const todayMarkerLeftPx = calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString);
@@ -3894,7 +3893,7 @@
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       return (
-        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) +
+        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString) +
         renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString)
       );
     }
