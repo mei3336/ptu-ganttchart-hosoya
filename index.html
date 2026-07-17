@@ -1040,6 +1040,20 @@
       color: var(--color-text-dark);
     }
 
+    /* 追加実装仕様書10章：件数表示（例：「3件」）。見出しの隣に小さく添える。 */
+    .panel-count-badge {
+      font-size: 11px;
+      color: var(--color-text-light);
+    }
+
+    /* 見出しの右側（保存ボタン等）と×ボタンをまとめる下位ラッパー。
+       .slide-panel-header-title-groupと対になる、右側用の同じ考え方のラッパー。 */
+    .slide-panel-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .slide-panel-close-button {
       border: none;
       background: none;
@@ -1105,6 +1119,18 @@
       display: flex;
       gap: 4px;
       flex: 0 0 auto;
+    }
+
+    /* 追加実装仕様書10章：スナップショット行の操作アイコン（«比較／⟲復元／🗑削除）は、
+       WBS行のホバーアイコン（.wbs-row-icons）と同じ考え方で、行にマウスを乗せた時だけ
+       表示する（常時表示の文字ボタンを廃止するため）。 */
+    .snapshot-item-icons {
+      opacity: 0;
+      transition: opacity .12s ease;
+    }
+
+    .panel-list-item:hover .snapshot-item-icons {
+      opacity: 1;
     }
 
     /* P3：即時メモの投稿欄（パネル下部固定） */
@@ -1436,14 +1462,20 @@
     </div>
   </aside>
 
-  <!-- P2：スナップショット一覧。保存・一覧・削除のみ（復元・比較は別工程）。 -->
+  <!-- P2：スナップショット一覧。保存・一覧・削除・復元・比較。追加実装仕様書10章：
+       保存ボタンは見出し内に一本化し、復元・比較は行ホバー時のアイコンに一本化する。 -->
   <aside id="snapshotSlidePanel" class="slide-panel">
     <div class="slide-panel-header">
-      <h2>スナップショット</h2>
-      <button type="button" id="closeSnapshotPanelButton" class="slide-panel-close-button">×</button>
+      <div class="slide-panel-header-title-group">
+        <h2>スナップショット</h2>
+        <span id="snapshotCountBadge" class="panel-count-badge"></span>
+      </div>
+      <div class="slide-panel-header-actions">
+        <button id="saveSnapshotButton" class="toolbar-button" type="button">保存</button>
+        <button type="button" id="closeSnapshotPanelButton" class="slide-panel-close-button">×</button>
+      </div>
     </div>
     <div class="slide-panel-body">
-      <button id="saveSnapshotButton" class="panel-add-button" type="button">＋ スナップショットを保存</button>
       <div id="snapshotPanelBody"></div>
     </div>
   </aside>
@@ -4305,9 +4337,9 @@
               <div class="panel-list-item-meta">${escapeHtmlText(snapshot.createdAt)}</div>
               ${compareResultHtml}
             </div>
-            <div class="panel-list-item-actions">
-              <button type="button" class="panel-add-button" data-action="restore-snapshot">この状態に復元</button>
-              <button type="button" class="panel-add-button" data-action="compare-snapshot">現在と比較</button>
+            <div class="panel-list-item-actions snapshot-item-icons">
+              <button type="button" class="wbs-icon-button" data-action="compare-snapshot" title="現在と比較">«</button>
+              <button type="button" class="wbs-icon-button" data-action="restore-snapshot" title="この状態に復元">⟲</button>
               <button type="button" class="wbs-icon-button" data-action="delete-snapshot" title="削除">🗑</button>
             </div>
           </div>`;
@@ -4319,17 +4351,26 @@
       document.getElementById("snapshotPanelBody").innerHTML = bodyHtml;
     }
 
+    // 【前提】count はプロジェクトに紐づくスナップショットの件数（未選択時はnull）。
+    // 【処理】見出し右側の件数表示（追加実装仕様書10章）を更新する。
+    // 【結果】#snapshotCountBadgeの表示テキストが最新の件数に切り替わる。
+    function updateSnapshotCountBadge(count) {
+      document.getElementById("snapshotCountBadge").textContent = count === null ? "" : `${count}件`;
+    }
+
     // 【前提】projectId はnull、または実在するプロジェクトのid。
     // 【処理】projectIdがnullなら空状態を表示し、そうでなければgetSnapshotsByProjectで
     //   取得して一覧を再描画する。
-    // 【結果】スナップショットパネルの表示が最新の状態に更新される。
+    // 【結果】スナップショットパネルの表示・件数表示が最新の状態に更新される。
     async function refreshSnapshotPanel(projectId) {
       if (!projectId) {
         applySnapshotPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        updateSnapshotCountBadge(null);
         return;
       }
       const snapshotList = await getSnapshotsByProject(projectId);
       applySnapshotPanel(renderSnapshotListToHtml(snapshotList, expandedSnapshotCompareIds, snapshotCompareResultsById));
+      updateSnapshotCountBadge(snapshotList.length);
     }
 
     // 【前提】currentSelectedProjectId・currentProjectObjectが設定済みであること。
