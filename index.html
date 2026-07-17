@@ -1085,6 +1085,34 @@
       font-size: 12px;
     }
 
+    .kanban-add-form-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .kanban-add-form-actions .kanban-add-submit-button {
+      flex: 1;
+    }
+
+    /* 追加実装仕様書6.1節：閉じている間だけ表示する「＋追加」トグルボタン
+       （押すとこの列の.kanban-add-formに差し替わる単発フォーム）。 */
+    .kanban-add-toggle-button {
+      width: 100%;
+      padding: 6px;
+      border: 1px dashed var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      background: none;
+      color: var(--color-text-light);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .kanban-add-toggle-button:hover {
+      background: var(--color-primary-light);
+      border-color: var(--color-accent);
+      color: var(--color-text-dark);
+    }
+
     /* ===== P2〜P6：右側スライドパネル共通の一覧項目・入力欄スタイル ===== */
     .panel-list-item {
       padding: 8px 16px;
@@ -3905,15 +3933,23 @@
     // ステータス選択で共有する。
     const TASK_STATUS_LABELS = { backlog: "未着手", doing: "進行中", done: "完了" };
 
+    // 追加実装仕様書6.1節：カンバン追加フォームの開閉。お手本ganttforge.htmlの_kbAddCol
+    // （どの列の追加フォームが開いているかを表す、列を跨いで1つだけの状態）を踏襲する。
+    // nullなら全列とも閉じている（＝「＋追加」ボタンのみ表示）。
+    let openKanbanAddFormColumnStatus = null;
+
     // 【前提】taskListForColumn はある1つのstatusに属するタスク配列。columnLabel はその列の
     //   日本語見出し。columnStatusValue はそのstatus文字列（追加フォームの送信先に使う）。
+    //   isAddFormOpen はこの列の追加フォームを開いた状態で描画するか。
     // 【処理】1列分のカンバンカード（各カードに削除ボタンを添える。詳細設計書3.3.2：
-    //   deleteTodo）と、モーダル・ダイアログ一覧P1「各列に追加フォームが直接埋め込み」の
-    //   仕様どおり、タスク名・優先度・期日の埋め込み追加フォームを組み立てる
-    //   （モーダルを介さない）。完了列("done")のみ、完了済み一括削除ボタンを見出し横に
-    //   添える（詳細設計書3.3.2：clearDoneTodos）。
+    //   deleteTodo）を組み立てる。追加フォームは「＋追加」を押した時だけ開く単発フォーム
+    //   とする（追加実装仕様書6.1節：常時表示だった埋め込みフォームを廃止し、
+    //   お手本と同じ開閉方式に変更。isAddFormOpenがfalseの間は「＋追加」ボタンのみ表示し、
+    //   trueになった列だけタスク名・優先度・期日の入力欄と追加／×（閉じる）ボタンを表示する）。
+    //   完了列("done")のみ、完了済み一括削除ボタンを見出し横に添える（詳細設計書3.3.2：
+    //   clearDoneTodos）。
     // 【結果】renderKanbanBoardToHtml から列単位で呼び出されるHTML文字列を返す。
-    function renderKanbanColumnToHtml(taskListForColumn, columnLabel, columnStatusValue) {
+    function renderKanbanColumnToHtml(taskListForColumn, columnLabel, columnStatusValue, isAddFormOpen) {
       const cardsHtml =
         taskListForColumn.length === 0
           ? '<p class="empty-state-message">タスクがありません。</p>'
@@ -3932,17 +3968,25 @@
               })
               .join("");
 
-      const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
-        .map(([value, label]) => `<option value="${value}"${value === "4" ? " selected" : ""}>${label}</option>`)
-        .join("");
-      const addFormHtml = `
-        <div class="kanban-add-form" data-column-status="${columnStatusValue}">
-          <input type="text" class="kanban-add-title-input" placeholder="タスク名">
-          <select class="kanban-add-priority-select">${priorityOptionsHtml}</select>
-          <input type="date" class="kanban-add-duedate-input">
-          <button type="button" class="panel-add-button kanban-add-submit-button">＋ 追加</button>
-        </div>
-      `;
+      let addFormHtml;
+      if (isAddFormOpen) {
+        const priorityOptionsHtml = Object.entries(TASK_PRIORITY_LABELS)
+          .map(([value, label]) => `<option value="${value}"${value === "4" ? " selected" : ""}>${label}</option>`)
+          .join("");
+        addFormHtml = `
+          <div class="kanban-add-form" data-column-status="${columnStatusValue}">
+            <input type="text" class="kanban-add-title-input" placeholder="タスク名">
+            <select class="kanban-add-priority-select">${priorityOptionsHtml}</select>
+            <input type="date" class="kanban-add-duedate-input">
+            <div class="kanban-add-form-actions">
+              <button type="button" class="panel-add-button kanban-add-submit-button">＋ 追加</button>
+              <button type="button" class="wbs-icon-button kanban-add-cancel-button" title="閉じる">×</button>
+            </div>
+          </div>
+        `;
+      } else {
+        addFormHtml = `<button type="button" class="kanban-add-toggle-button" data-column-status="${columnStatusValue}">＋ 追加</button>`;
+      }
       const clearDoneButtonHtml =
         columnStatusValue === "done" ? '<button type="button" class="toolbar-button" id="clearDoneTasksButton">完了済みを一括削除</button>' : "";
       return `<div class="kanban-column" data-column-status="${columnStatusValue}">
@@ -3956,12 +4000,13 @@
 
     // 【前提】taskGroupsByStatus は groupTasksByStatus の戻り値。
     // 【処理】backlog/doing/doneの3列を横に並べたカンバンボード全体のHTML文字列を組み立てる。
+    //   openKanbanAddFormColumnStatusと一致する列だけ追加フォームを開いた状態で描画する。
     // 【結果】カンバンパネルのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderKanbanBoardToHtml(taskGroupsByStatus) {
       return `<div class="kanban-board">
-        ${renderKanbanColumnToHtml(taskGroupsByStatus.backlog, "未着手", "backlog")}
-        ${renderKanbanColumnToHtml(taskGroupsByStatus.doing, "進行中", "doing")}
-        ${renderKanbanColumnToHtml(taskGroupsByStatus.done, "完了", "done")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.backlog, "未着手", "backlog", openKanbanAddFormColumnStatus === "backlog")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.doing, "進行中", "doing", openKanbanAddFormColumnStatus === "doing")}
+        ${renderKanbanColumnToHtml(taskGroupsByStatus.done, "完了", "done", openKanbanAddFormColumnStatus === "done")}
       </div>`;
     }
 
@@ -6226,10 +6271,30 @@
       description: "メモ",
     };
 
+    // 【前提】columnStatus はクリックされた「＋追加」ボタンのdata-column-status値。
+    // 【処理】openKanbanAddFormColumnStatusをその列に設定して再描画する（追加実装仕様書
+    //   6.1節：押した時だけフォームを開く）。
+    // 【結果】その列だけ追加フォームが開いた状態になり、タイトル入力欄にフォーカスが移る。
+    async function handleOpenKanbanAddFormButtonClick(columnStatus) {
+      openKanbanAddFormColumnStatus = columnStatus;
+      await refreshKanbanPanel(currentSelectedProjectId);
+      document.querySelector(".kanban-add-title-input")?.focus();
+    }
+
+    // 【前提】なし。
+    // 【処理】openKanbanAddFormColumnStatusをnullに戻して再描画する（追加実装仕様書6.1節：
+    //   ×ボタン・Escapeキーによるキャンセル）。
+    // 【結果】開いていた追加フォームが閉じ、「＋追加」ボタンの表示に戻る。
+    async function handleCloseKanbanAddFormButtonClick() {
+      openKanbanAddFormColumnStatus = null;
+      await refreshKanbanPanel(currentSelectedProjectId);
+    }
+
     // 【前提】formElement は「.kanban-add-form」要素（data-column-status属性でstatus値を持つ）。
-    // 【処理】埋め込みフォームの入力値を読み取り、タスク名が空でなければaddTaskで保存する
+    // 【処理】開いているフォームの入力値を読み取り、タスク名が空でなければaddTaskで保存する
     //   （モーダル・ダイアログ一覧P1：モーダルを介さずその場で追加）。
-    // 【結果】保存後、カンバンパネルを再描画する（入力欄は再描画により自動的に空になる）。
+    // 【結果】保存後、フォームを閉じてから（追加実装仕様書6.1節：保存後は自動的に閉じる
+    //   単発フォームとする）カンバンパネルを再描画する。
     async function handleKanbanAddFormSubmit(formElement) {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
@@ -6257,6 +6322,7 @@
       };
       await addTask(taskToSave);
       await recordChangelogEntry("add", currentSelectedProjectId, "tasks", "タスク", taskToSave.id, taskToSave.title, null, taskToSave, {});
+      openKanbanAddFormColumnStatus = null;
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
@@ -6917,6 +6983,16 @@
           handleKanbanAddFormSubmit(submitButton.closest(".kanban-add-form"));
           return;
         }
+        const openFormButton = event.target.closest(".kanban-add-toggle-button");
+        if (openFormButton) {
+          handleOpenKanbanAddFormButtonClick(openFormButton.dataset.columnStatus);
+          return;
+        }
+        const cancelFormButton = event.target.closest(".kanban-add-cancel-button");
+        if (cancelFormButton) {
+          handleCloseKanbanAddFormButtonClick();
+          return;
+        }
         const deleteButton = event.target.closest('[data-action="delete-task"]');
         if (deleteButton) {
           const card = deleteButton.closest("[data-task-id]");
@@ -6930,6 +7006,16 @@
           return;
         }
         if (event.target.id === "clearDoneTasksButton") handleClearDoneTasksButtonClick();
+      });
+      // 追加実装仕様書6.1節：追加フォームのタイトル入力欄でEnter＝追加確定、Escape＝キャンセル
+      // （お手本ganttforge.htmlのkbNewTitle onkeydownと同じ挙動）。
+      document.getElementById("kanbanPanelBody").addEventListener("keydown", (event) => {
+        if (!event.target.classList.contains("kanban-add-title-input")) return;
+        if (event.key === "Enter") {
+          handleKanbanAddFormSubmit(event.target.closest(".kanban-add-form"));
+        } else if (event.key === "Escape") {
+          handleCloseKanbanAddFormButtonClick();
+        }
       });
       // ドラッグ＆ドロップによる列間の移動（WBS行の並び替えと同じPointer/HTML5 Drag &
       // Drop APIの使い分け方針：カンバンも離散的な移動先＝列単位のため、こちらもHTML5
