@@ -750,6 +750,13 @@
       background: var(--color-text-light);
     }
 
+    /* 追加実装仕様書11章：メモ付きカードの📝バッジ（お手本のkb-card-tag memoに相当）。
+       titleにメモ本文全体を表示するだけの表示専用バッジ。 */
+    .kanban-card-memo-badge {
+      margin-left: 4px;
+      cursor: help;
+    }
+
     /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
     .mindmap-canvas {
       position: relative;
@@ -4524,9 +4531,15 @@
                 const dueDateHtml = task.dueDate ? `<div class="panel-list-item-meta">期日：${escapeHtmlText(task.dueDate)}</div>` : "";
                 const priorityLabel = TASK_PRIORITY_LABELS[task.priority] || task.priority;
                 const priorityBadgeHtml = `<span class="priority-badge priority-${escapeHtmlText(String(task.priority))}">${escapeHtmlText(priorityLabel)}</span>`;
+                // 追加実装仕様書11章：メモ（description）付きカードにお手本と同じ📝バッジを表示し、
+                // titleにメモ本文全体を表示する（お手本ganttforge.htmlのkb-card-tag memoに相当。
+                // 現状このバッジ自体が実装されていなかったため新規に追加する）。
+                const memoBadgeHtml = task.description
+                  ? `<span class="kanban-card-memo-badge" title="${escapeHtmlText(task.description)}">📝</span>`
+                  : "";
                 return `<div class="kanban-card" data-task-id="${escapeHtmlText(task.id)}" draggable="true">
-                    <div class="kanban-card-main" data-action="edit-task">
-                      <div>${escapeHtmlText(task.title)} ${priorityBadgeHtml}</div>
+                    <div class="kanban-card-main" data-action="edit-task" title="編集">
+                      <div>${escapeHtmlText(task.title)} ${priorityBadgeHtml}${memoBadgeHtml}</div>
                       ${dueDateHtml}
                     </div>
                     <button type="button" class="wbs-icon-button" data-action="delete-task" title="削除">🗑</button>
