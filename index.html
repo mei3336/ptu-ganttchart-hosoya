@@ -498,6 +498,43 @@
       white-space: nowrap;
     }
 
+    /* ユーザー指示：「今日」も、マイルストーン名と同じ帯（.gantt-milestone-band）に
+       同じサイズ感で表示する。青背景の楕円（ピル型）に白文字、下端にピンの先のような
+       三角形を付け、今日を示す縦線の位置をちょうど指すようにする。 */
+    .gantt-today-band-marker {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      transform: translateX(-50%);
+    }
+
+    .gantt-today-band-pin {
+      position: relative;
+      background: var(--color-accent);
+      color: var(--color-white);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* ピルの下端中央に、ピンの先端のような小さな三角形を作る（border trickで三角形化）。 */
+    .gantt-today-band-pin::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -4px;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 4px solid var(--color-accent);
+    }
+
     .gantt-day-column-header {
       position: absolute;
       top: calc(var(--milestone-band-height) + 40px);
@@ -4335,6 +4372,7 @@
 
     // 【前提】timelineDays は buildGanttTimelineDays の戻り値。granularity は表示粒度。
     //   milestones は project.milestones。timelineStartDateString は基準日（1日目の日付）。
+    //   todayDateString は基準日（"YYYY-MM-DD"）。呼び出し元がnew Date()から求めて渡す。
     // 【処理】buildGanttTimelineHeaderGroupsで1段目・2段目の見出しグループを求め、
     //   それぞれをHTML文字列化する（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
     //   1段目40px＋2段目42px相当として配分）。土日の色分けは「日」表示のときのみ意味を持つ。
@@ -4342,8 +4380,12 @@
     //   描画する（追加実装仕様書4章）】ガント本体（.gantt-body）内はバーが並ぶレイヤーのため、
     //   そこにひし形を重ねると視認性が落ちる。ヘッダーと本体は同じ横スクロールコンテナの中に
     //   あるため、calculateMilestoneMarkerPositionsが返すleftPxはどちらでもそのまま使える。
+    // 【設計判断：「今日」もマイルストーンと同じ帯に表示する】マイルストーン名と同じ列
+    //   （.gantt-milestone-band）に、青背景・白文字の「今日」ピンを追加する（ユーザー指示）。
+    //   ピンの先端（三角形）が縦線の位置を指すよう、マーカー自体をtranslateX(-50%)で
+    //   その日の左端＋半日ぶんの位置に中央揃えする。
     // 【結果】gantt-timeline-headerのHTML文字列を返す。
-    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString) {
+    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString, todayDateString) {
       const { level1Groups, level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
 
       const milestoneBandHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
@@ -4352,6 +4394,12 @@
             `<div class="gantt-milestone-band-marker" style="left:${marker.leftPx}px"><div class="gantt-milestone-band-diamond"></div><span class="gantt-milestone-band-label">${escapeHtmlText(marker.name)}</span></div>`
         )
         .join("");
+
+      const todayMarkerLeftPx = calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString);
+      const todayBandHtml =
+        todayMarkerLeftPx === null
+          ? ""
+          : `<div class="gantt-today-band-marker" style="left:${todayMarkerLeftPx + pixelsPerDay / 2}px"><div class="gantt-today-band-pin">今日</div></div>`;
 
       const level1Html = level1Groups
         .map(
@@ -4370,7 +4418,7 @@
         .join("");
 
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px"><div class="gantt-milestone-band">${milestoneBandHtml}</div>${level1Html}${level2Html}</div>`;
+      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px"><div class="gantt-milestone-band">${milestoneBandHtml}${todayBandHtml}</div>${level1Html}${level2Html}</div>`;
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
@@ -4516,7 +4564,7 @@
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       return (
-        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString) +
+        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString, todayDateString) +
         renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString)
       );
     }
