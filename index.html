@@ -793,10 +793,17 @@
     }
 
     /* ===== モーダル・ダイアログ一覧①：中央モーダル（UIデザイン仕様書2.3節） ===== */
+    /* 追加実装仕様書5章：モーダル共通デザインガイドライン（M1〜M4／タスク編集モーダル共通）。
+       ・オーバーレイの色・ぼかしはお手本ganttforge.htmlの.moverlay（rgba(17,24,39,.4)＋
+       　backdrop-filter:blur(4px)）に正確に合わせる（以前はアルファ値.5でぼかし無しだった）。
+       ・角丸はお手本の.modal（14px）に合わせる（内側の入力欄・スウォッチ等は
+       　従来通りvar(--radius-standard)＝8pxのまま統一し、外枠だけ変える）。
+       ・幅は420px→480pxに広げ、縦長になりがちな内容量に対して正方形に近い比率へ寄せる。 */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(17, 24, 39, .5);
+      background: rgba(17, 24, 39, .4);
+      backdrop-filter: blur(4px);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -809,10 +816,10 @@
 
     .modal-panel {
       background: var(--color-white);
-      border-radius: var(--radius-standard);
+      border-radius: 14px;
       box-shadow: var(--shadow-large);
-      padding: 20px;
-      width: 420px;
+      padding: 24px;
+      width: 480px;
       max-width: 90vw;
       max-height: 85vh;
       overflow-y: auto;
@@ -829,6 +836,20 @@
       display: flex;
       flex-direction: column;
       gap: 4px;
+    }
+
+    /* 追加実装仕様書5章：関連する日付項目（開始日／終了日）を横1列にまとめる行。
+       中の.modal-fieldは幅を均等割りにし、margin-bottomは行自体に持たせる
+       （個々の.modal-fieldがmargin-bottomを持つと、行の下に二重の余白ができるため0にする）。 */
+    .modal-field-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .modal-field-row .modal-field {
+      flex: 1;
+      margin-bottom: 0;
     }
 
     .modal-field label {
@@ -924,7 +945,7 @@
     }
 
     /* M9：データ取込－差分比較モーダル。ストアごとにグループ化した一覧を持つため、
-       通常のモーダル（420px）より広い専用幅にする。:has()で対象を絞り、他モーダルの
+       通常のモーダル（480px）より広い専用幅にする。:has()で対象を絞り、他モーダルの
        幅には影響させない。 */
     .modal-panel:has(.import-diff-list) {
       width: 640px;
@@ -5137,13 +5158,15 @@
           <label for="projectModalNameInput">プロジェクト名</label>
           <input type="text" id="projectModalNameInput" value="${escapeHtmlText(nameValue)}">
         </div>
-        <div class="modal-field">
-          <label for="projectModalStartDateInput">開始日</label>
-          <input type="date" id="projectModalStartDateInput" value="${escapeHtmlText(startDateValue)}">
-        </div>
-        <div class="modal-field">
-          <label for="projectModalEndDateInput">終了日</label>
-          <input type="date" id="projectModalEndDateInput" value="${escapeHtmlText(endDateValue)}">
+        <div class="modal-field-row">
+          <div class="modal-field">
+            <label for="projectModalStartDateInput">開始日</label>
+            <input type="date" id="projectModalStartDateInput" value="${escapeHtmlText(startDateValue)}">
+          </div>
+          <div class="modal-field">
+            <label for="projectModalEndDateInput">終了日</label>
+            <input type="date" id="projectModalEndDateInput" value="${escapeHtmlText(endDateValue)}">
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="modal-button-secondary" id="projectModalCancelButton">キャンセル</button>
@@ -5548,15 +5571,17 @@
           <label for="scheduleModalNameInput">スケジュール名</label>
           <input type="text" id="scheduleModalNameInput" value="${escapeHtmlText(nameValue)}">
         </div>
-        <div class="modal-field">
-          <label for="scheduleModalStartDateInput">開始日</label>
-          <input type="date" id="scheduleModalStartDateInput" value="${escapeHtmlText(startDateValue)}" ${dateDisabledAttribute}>
-          ${dateHintHtml}
+        <div class="modal-field-row">
+          <div class="modal-field">
+            <label for="scheduleModalStartDateInput">開始日</label>
+            <input type="date" id="scheduleModalStartDateInput" value="${escapeHtmlText(startDateValue)}" ${dateDisabledAttribute}>
+          </div>
+          <div class="modal-field">
+            <label for="scheduleModalEndDateInput">終了日</label>
+            <input type="date" id="scheduleModalEndDateInput" value="${escapeHtmlText(endDateValue)}" ${dateDisabledAttribute}>
+          </div>
         </div>
-        <div class="modal-field">
-          <label for="scheduleModalEndDateInput">終了日</label>
-          <input type="date" id="scheduleModalEndDateInput" value="${escapeHtmlText(endDateValue)}" ${dateDisabledAttribute}>
-        </div>
+        ${dateHintHtml}
         <div class="modal-field">
           <label for="scheduleModalAssigneeInput">担当者</label>
           <input type="text" id="scheduleModalAssigneeInput" value="${escapeHtmlText(assigneeValue)}">
