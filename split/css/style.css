@@ -1,0 +1,1615 @@
+    /* ===== デザイントークン（UIデザイン仕様書1章の値をそのまま採用） ===== */
+    :root {
+      --color-bg-page: #F3F4F6;
+      --color-white: #FFFFFF;
+      --color-surface-2: #F9FAFB;
+      --color-surface-3: #E5E7EB;
+      --color-border: #D1D5DB;
+      --color-border-dark: #9CA3AF;
+      --color-primary-navy: #1E40AF;
+      --color-primary-light: #EFF6FF;
+      --color-accent: #2563EB;
+      --color-accent-hover: #1D4ED8;
+      --color-danger: #DC2626;
+      --color-danger-light: #FEF2F2;
+      --color-text-dark: #111827;
+      --color-text-mid: #374151;
+      --color-text-light: #6B7280;
+
+      --shadow-small: 0 1px 3px rgba(0, 0, 0, .10), 0 1px 2px rgba(0, 0, 0, .06);
+      --shadow-medium: 0 4px 16px rgba(0, 0, 0, .10), 0 2px 6px rgba(0, 0, 0, .06);
+      --shadow-large: 0 16px 48px rgba(0, 0, 0, .14), 0 4px 12px rgba(0, 0, 0, .08);
+
+      --radius-standard: 8px;
+      --gantt-row-height: 44px;
+      --gantt-header-height: 42px;
+      /* 対応表No.42（追加実装仕様書4章）：マイルストーンのひし形＋名前ラベルは、月・日の
+         見出し行（合計82px＝40px＋42px）の上に専用の帯として追加するため、
+         タイムラインヘッダー全体の高さはその帯ぶんだけ伸びる。 */
+      --milestone-band-height: 24px;
+      --timeline-header-height: calc(var(--milestone-band-height) + 82px);
+      --wbs-panel-width: 520px;
+      --header-primary-height: 52px;
+      --header-secondary-height: 34px;
+      /* 追加実装仕様書3.2節：ガント本体の高さH（ganttforge.html 1780〜1784行目で検証済み）。
+         H=Math.max(行数×44px, 500px)。行数が少ない間は500px固定、行数が増えると
+         「行数×44px」に切り替わって伸びていく（画面の表示領域の高さとは無関係の
+         固定値であることをお手本のソースで確認済み。以前はここを画面の残り高さの
+         計算式にしていたが、本書の検証結果に合わせて固定500pxへ修正する）。 */
+      --gantt-body-min-height: 500px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    /* 対応表No.41：WBSパネルとガント本体を独立してスクロールさせるため、bodyを縦方向の
+       flexコンテナにし、<main>に残りの高さをすべて割り当てる（#lockBandの表示/非表示で
+       ヘッダー群の高さが変わっても、計算式に書き起こさず自動的に追従させるため）。
+       固定配置（position:fixed）のモーダル・トースト・スライドパネル等はbodyの表示方式に
+       影響されないため、このレイアウト変更の影響を受けない。 */
+    body {
+      margin: 0;
+      background: var(--color-bg-page);
+      color: var(--color-text-dark);
+      font-family: 'DM Sans', -apple-system, "Segoe UI", "Hiragino Sans", sans-serif;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    main {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    /* ===== ヘッダー（基本設計書2.1節：2段構成） ===== */
+    /* 【設計判断：追加実装仕様書2.2節「横スクロールは実装しない」＋ユーザー指示（折り返しは
+       せず、あふれたボタンはそのままでよい。ただし幅が狭まるにつれ、まずgapを詰めて
+       あふれを最小限にし、それでも狭ければ「日〜3か月」「開始〜状態」の2ブロックを
+       非表示にする）】
+       折り返し（flex-wrap:wrap）は行わず1行のまま維持する。横スクロールバーも出さず、
+       あふれた分はoverflow-x:hiddenで見えなくする（お手本にも横スクロールは無いため、
+       「折り返す・省略される」のうち「省略される」を選ぶ）。 */
+    .app-header-primary,
+    .app-header-secondary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: nowrap;
+      overflow-x: hidden;
+      padding: 0 16px;
+    }
+
+    .app-header-primary {
+      height: var(--header-primary-height);
+      background: var(--color-white);
+      border-bottom: 1px solid var(--color-border);
+      box-shadow: var(--shadow-small);
+    }
+
+    .app-header-secondary {
+      height: var(--header-secondary-height);
+      background: var(--color-surface-2);
+      border-bottom: 1px solid var(--color-border);
+      font-size: 12px;
+    }
+
+    .header-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+    }
+
+    /* 「表示粒度（日/週/1ヶ月/3ヶ月）」「列トグル（開始/終了/状態）」のように、
+       意味のあるまとまりを1つの塊としてスクロール・折り返しさせるための入れ物。
+       塊の中はgapを詰め、塊同士の間はheader-groupのgap(10px)で少し広めに取る。 */
+    .button-group {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    /* 【設計判断：段階的な「詰め」処理】幅が狭まるにつれ、まずgap（ボタン同士の間隔）を
+       段階的に詰めて、あふれを最大限抑える。ボタン自体の文字は縮小・省略しない
+       （読めなくなるため）。.button-group本体の定義より後ろに置き、同じ詳細度の
+       ルール同士でも後勝ちのCSSカスケードで上書きされるようにする。 */
+    @media (max-width: 1500px) {
+      .header-group {
+        gap: 6px;
+      }
+      .button-group {
+        gap: 2px;
+      }
+    }
+
+    /* 【設計判断：段階的な「詰め」処理の最終段階】gapを詰めてもなお収まらない幅になったら、
+       「日〜3か月」（表示粒度）「開始〜状態」（列トグル）の2ブロックを丸ごと非表示にする
+       （ユーザー指示：この2ブロックは同時に隠してよく、どちらが先ということはない）。
+       この2ブロックは.button-groupクラスのみで実装されているため、そのままセレクタに使える。 */
+    @media (max-width: 1200px) {
+      .button-group {
+        display: none;
+      }
+    }
+
+    .app-logo {
+      font-weight: 700;
+      color: var(--color-primary-navy);
+      font-size: 13px;
+      margin-right: 4px;
+    }
+
+    /* 「ロック」トグルON時に第1・第2ヘッダーとガントの間へ挿入する帯（基本設計書3.3節）。 */
+    #lockBand {
+      background: var(--color-danger-light);
+      border-bottom: 2px solid var(--color-danger);
+      color: var(--color-danger);
+      padding: 4px 16px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    #lockBand[hidden] {
+      display: none;
+    }
+
+    button.toolbar-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 12px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    button.toolbar-button:hover:not(:disabled) {
+      background: var(--color-primary-light);
+      border-color: var(--color-accent);
+    }
+
+    button.toolbar-button.is-active {
+      background: var(--color-accent);
+      color: var(--color-white);
+      border-color: var(--color-accent);
+    }
+
+    button.toolbar-button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    #createProjectButton {
+      padding: 5px 12px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-accent);
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #createProjectButton:hover {
+      background: var(--color-accent-hover);
+      color: var(--color-white);
+    }
+
+    select#projectSelectDropdown {
+      padding: 4px 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-text-dark);
+    }
+
+    /* ===== メイン作業領域：WBSパネル＋ガントチャート（UIデザイン仕様書2.1節） ===== */
+    #ganttPanel {
+      height: 100%;
+    }
+
+    .main-workspace {
+      display: flex;
+      align-items: flex-start;
+      height: 100%;
+    }
+
+    /* 追加実装仕様書2.1節：プロジェクト未選択時の空状態画面。.main-workspaceと同じ
+       高さいっぱいに広がり、アイコン・見出し・説明文・ボタンを中央に積み重ねる。 */
+    .gantt-empty-state {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+    }
+
+    /* 【設計判断】.main-workspace/.gantt-empty-stateはどちらもdisplay:flexを持つため、
+       JS側でhidden属性を付けるだけでは非表示にならない（属性セレクタ[hidden]よりクラス
+       セレクタの方が先に評価されるわけではないが、[hidden]単体のUA既定スタイルより
+       このクラスの指定の方が詳細度が高く上書きしてしまうため）。[hidden]と組み合わせた
+       セレクタで明示的にdisplay:noneへ戻す。 */
+    .main-workspace[hidden],
+    .gantt-empty-state[hidden] {
+      display: none;
+    }
+
+    .gantt-empty-state-icon {
+      font-size: 64px;
+      line-height: 1;
+      color: var(--color-border-dark);
+      margin-bottom: 8px;
+    }
+
+    .gantt-empty-state-title {
+      margin: 0;
+      font-size: 18px;
+      color: var(--color-text-dark);
+    }
+
+    .gantt-empty-state-description {
+      margin: 0;
+      color: var(--color-text-light);
+      font-size: 13px;
+    }
+
+    .wbs-panel {
+      width: var(--wbs-panel-width);
+      flex: 0 0 var(--wbs-panel-width);
+      background: var(--color-white);
+      border-right: 1px solid var(--color-border);
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    /* 対応表No.41：見出し行を.wbs-panel（スクロールコンテナ）の上端に固定する。
+       position:stickyはスクロール中もtop:0の位置に留まり続け、行本体だけが下を
+       通り抜けるようにスクロールする（お手本のwbsBody相当：見出し固定・本体スクロール）。 */
+    .wbs-header-row {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      height: var(--timeline-header-height);
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 0 8px 6px;
+      font-weight: 600;
+      color: var(--color-primary-navy);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+    }
+
+    .wbs-header-row .wbs-column-name {
+      flex: 1;
+    }
+
+    .wbs-header-row .wbs-column-extra {
+      width: 84px;
+      flex: 0 0 84px;
+      font-size: 12px;
+    }
+
+    .wbs-row {
+      height: var(--gantt-row-height);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+      border-bottom: 1.5px solid var(--color-border);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .wbs-row:nth-child(even) {
+      background: var(--color-surface-2);
+    }
+
+    .wbs-row .wbs-column-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .wbs-row .wbs-column-extra {
+      width: 84px;
+      flex: 0 0 84px;
+      font-size: 12px;
+      color: var(--color-text-mid);
+    }
+
+    /* モーダル・ダイアログ一覧「1. スケジュール行のホバー時操作アイコン一式」：
+       通常はうっすら（非表示）にしておき、行にマウスを乗せたときだけ現れる。
+       アイコン自体は常にDOMにあり、opacityで見た目だけを切り替える
+       （クリック領域を安定させるため、display:noneにはしない）。 */
+    .wbs-row-icons {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 0 0 auto;
+      opacity: 0;
+      transition: opacity .12s ease;
+    }
+
+    .wbs-row:hover .wbs-row-icons {
+      opacity: 1;
+    }
+
+    .wbs-header-row .wbs-row-icons {
+      flex: 0 0 auto;
+      width: 96px;
+    }
+
+    .wbs-icon-button {
+      width: 18px;
+      height: 18px;
+      line-height: 16px;
+      padding: 0;
+      border: 1px solid var(--color-border-dark);
+      border-radius: 4px;
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .wbs-icon-button:hover:not(:disabled) {
+      background: var(--color-primary-light);
+      border-color: var(--color-accent);
+    }
+
+    .wbs-icon-button:disabled {
+      opacity: .35;
+      cursor: not-allowed;
+    }
+
+    /* 開閉アイコンは「WBS番号とスケジュール名の間」に常時表示する（ホバー不要）。
+       .wbs-row-icons（ホバーで現れる操作アイコン群）の外に置くことでopacity制御の対象外にする。 */
+    .wbs-toggle-button {
+      margin: 0 4px;
+      vertical-align: middle;
+    }
+
+    /* WBS番号：お手本同様、太字＋強調色（UIデザイン仕様書1.1のプライマリ色）で目立たせる。 */
+    .wbs-number {
+      font-weight: 700;
+      color: var(--color-primary-navy);
+    }
+
+    /* ドラッグ用グリップハンドル。ホバー時のみうっすら表示する（操作アイコン群と同じ方針）。
+       行の左端・WBS番号よりさらに左（インデントの外側）に固定幅で置く。 */
+    .wbs-drag-handle {
+      flex: 0 0 14px;
+      width: 14px;
+      text-align: center;
+      color: var(--color-text-light);
+      cursor: grab;
+      opacity: 0;
+      transition: opacity .12s ease;
+      user-select: none;
+    }
+
+    .wbs-row:hover .wbs-drag-handle {
+      opacity: 1;
+    }
+
+    .wbs-drag-handle-spacer {
+      flex: 0 0 14px;
+      width: 14px;
+    }
+
+    .gantt-scroll-area {
+      flex: 1;
+      overflow-x: auto;
+      overflow-y: auto;
+      height: 100%;
+      background: var(--color-white);
+    }
+
+    /* 対応表No.41：見出し行（月・日の目盛り）は縦スクロールに追従させず.gantt-scroll-area
+       （スクロールコンテナ）の上端に固定する。横スクロールは.gantt-scroll-area自体が
+       ヘッダー・本体をまとめて動かすため、この見出しはposition:stickyでも横方向には
+       ついていく（stickyは指定した軸だけ固定し、他の軸はコンテナと一緒に動く）。 */
+    .gantt-timeline-header {
+      height: var(--timeline-header-height);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+    }
+
+    .gantt-month-label {
+      position: absolute;
+      top: var(--milestone-band-height);
+      height: 40px;
+      display: flex;
+      align-items: center;
+      padding-left: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--color-primary-navy);
+      border-right: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    /* 対応表No.42（追加実装仕様書4章）：マイルストーンのひし形＋名前ラベルを表示する専用の帯。
+       バーが並ぶ行（.gantt-body）とは別レイヤーとして、月・日の見出し行の「上」に置く。 */
+    .gantt-milestone-band {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: var(--milestone-band-height);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .gantt-milestone-band-marker {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transform: translateX(-5px);
+    }
+
+    .gantt-milestone-band-diamond {
+      width: 10px;
+      height: 10px;
+      background: #D97706;
+      border-radius: 1px;
+      transform: rotate(45deg);
+      flex-shrink: 0;
+    }
+
+    .gantt-milestone-band-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #D97706;
+      white-space: nowrap;
+    }
+
+    /* ユーザー指示：「今日」も、マイルストーン名と同じ帯（.gantt-milestone-band）に
+       同じサイズ感で表示する。青背景の楕円（ピル型）に白文字、下端にピンの先のような
+       三角形を付け、今日を示す縦線の位置をちょうど指すようにする。 */
+    .gantt-today-band-marker {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      transform: translateX(-50%);
+    }
+
+    .gantt-today-band-pin {
+      position: relative;
+      background: var(--color-accent);
+      color: var(--color-white);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* ピルの下端中央に、ピンの先端のような小さな三角形を作る（border trickで三角形化）。 */
+    .gantt-today-band-pin::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -4px;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 4px solid var(--color-accent);
+    }
+
+    .gantt-day-column-header {
+      position: absolute;
+      top: calc(var(--milestone-band-height) + 40px);
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--color-text-light);
+      border-right: 1px solid var(--color-surface-3);
+    }
+
+    .gantt-day-column-header.is-saturday {
+      background: rgba(37, 99, 235, .09);
+      color: var(--color-accent);
+    }
+
+    .gantt-day-column-header.is-sunday {
+      background: rgba(220, 38, 38, .09);
+      color: var(--color-danger);
+    }
+
+    /* 追加実装仕様書1章：祝日の背景色（薄橙）。土＝薄青・日＝薄赤と同じ考え方で、
+       祝日は橙系の色（お手本ganttforge.htmlの.hc.hol/.ds.holに準拠）にする。 */
+    .gantt-day-column-header.is-holiday {
+      background: rgba(234, 88, 12, .12);
+      color: #C2410C;
+    }
+
+    .gantt-body {
+      position: relative;
+      cursor: grab;
+    }
+
+    /* UI差分表No.42：背景ドラッグ中のカーソル（地図アプリの「掴んでいる」表現）。 */
+    .gantt-scroll-area.is-background-dragging,
+    .gantt-scroll-area.is-background-dragging .gantt-body {
+      cursor: grabbing;
+    }
+
+    .gantt-row-background {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: var(--gantt-row-height);
+      border-bottom: 1.5px solid var(--color-border);
+    }
+
+    .gantt-row-background.is-even-row {
+      background: var(--color-surface-2);
+    }
+
+    .gantt-day-column-bg {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-right: 1px solid var(--color-surface-3);
+    }
+
+    .gantt-day-column-bg.is-saturday {
+      background: rgba(37, 99, 235, .05);
+    }
+
+    .gantt-day-column-bg.is-sunday {
+      background: rgba(220, 38, 38, .05);
+    }
+
+    .gantt-day-column-bg.is-holiday {
+      background: rgba(234, 88, 12, .08);
+    }
+
+    /* 週/1ヶ月/3ヶ月表示では土日という概念が意味を持たないため、縞模様で列の区切りだけを示す。 */
+    .gantt-day-column-bg.is-alt-period {
+      background: var(--color-surface-3);
+      opacity: .4;
+    }
+
+    /* 追加実装仕様書3.1節：日ごとの区切りを示す薄い縦線。JSがbackground-sizeに
+       pixelsPerDayを指定し、この1px幅の線をその間隔で繰り返し表示する。
+       クリック・ドラッグの妨げにならないよう装飾専用のレイヤーとして扱う。 */
+    .gantt-day-grid-lines {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      background-image: linear-gradient(to right, var(--color-surface-3) 1px, transparent 1px);
+      background-repeat: repeat-x;
+      pointer-events: none;
+    }
+
+    /* バーの視覚仕様（UIデザイン仕様書3章）：親行は太め・角丸大きめで行中央、
+       子（葉）行は薄めで行の65%あたりの位置。完了ステータスは不透明度を下げる。 */
+    .gantt-bar {
+      position: absolute;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      color: var(--color-white);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      box-shadow: var(--shadow-small);
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .gantt-bar.is-parent-bar {
+      border-radius: 5px;
+      height: 24px;
+    }
+
+    /* 詳細設計書3.2.4：掴み手は常時表示ではなく、バーにマウスを乗せた時のみうっすら色が付く。
+       葉ノード（子を持たない行）にしか付与されない（renderGanttBodyToHtml側の分岐）。 */
+    .gantt-bar-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: ew-resize;
+    }
+
+    .bar-lh {
+      left: 0;
+    }
+
+    .bar-rh {
+      right: 0;
+    }
+
+    .gantt-bar:hover .gantt-bar-handle {
+      background: rgba(0, 0, 0, .18);
+    }
+
+    /* UI差分表No.52：バーホバー時の演出（お手本：filter:brightness(.9);box-shadow強調）。 */
+    .gantt-bar:hover {
+      filter: brightness(.9);
+      box-shadow: var(--shadow-medium);
+    }
+
+    .gantt-bar.is-bar-dragging {
+      opacity: .85;
+      box-shadow: var(--shadow-medium);
+    }
+
+    .gantt-bar.is-done-status {
+      opacity: .55;
+    }
+
+    /* 追加実装仕様書4章：マイルストーンの縦のガイド線。ひし形＋名前ラベルは
+       .gantt-milestone-band（タイムラインヘッダー側の専用帯）に移したため、ここでは
+       .gantt-body内を貫く縦線のみを描画する（点線→オレンジの実線に変更）。 */
+    .gantt-milestone-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      border-left: 2px solid #D97706;
+    }
+
+    /* 「今日」を示す縦のハイライト線。マイルストーン線と同じくtop:0;bottom:0で
+       .gantt-body（親要素）の高さいっぱいに伸びる（JS側では高さを指定しない）。 */
+    .gantt-today-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--color-accent);
+      z-index: 1;
+    }
+
+    /* ===== カンバン（タスク管理） ===== */
+    .kanban-board {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .kanban-column {
+      flex: 1;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      padding: 8px;
+    }
+
+    .kanban-column-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .kanban-column h3 {
+      margin: 0;
+      font-size: 13px;
+      color: var(--color-text-mid);
+    }
+
+    .kanban-card {
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      box-shadow: var(--shadow-small);
+      padding: 8px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: grab;
+    }
+
+    /* UI差分表No.60：ドラッグ中の見た目（お手本：opacity:.4;transform:scale(.96)）。 */
+    .kanban-card.is-dragging {
+      opacity: .4;
+      transform: scale(.96);
+    }
+
+    .kanban-card-main {
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
+    }
+
+    /* UI差分表No.58：優先度タグの色分けバッジ（お手本：赤/橙/青の色分け）。
+       4(なし)は赤/橙/青のいずれにも当たらないため、中立色（グレー）を追加する。 */
+    .priority-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--color-white);
+    }
+
+    .priority-badge.priority-1 {
+      background: var(--color-danger);
+    }
+
+    .priority-badge.priority-2 {
+      background: #D97706;
+    }
+
+    .priority-badge.priority-3 {
+      background: var(--color-accent);
+    }
+
+    .priority-badge.priority-4 {
+      background: var(--color-text-light);
+    }
+
+    /* 追加実装仕様書11章：メモ付きカードの📝バッジ（お手本のkb-card-tag memoに相当）。
+       titleにメモ本文全体を表示するだけの表示専用バッジ。 */
+    .kanban-card-memo-badge {
+      margin-left: 4px;
+      cursor: help;
+    }
+
+    /* ===== マインドマップ（issueのx,y座標を使った絶対配置） ===== */
+    .mindmap-canvas {
+      position: relative;
+      height: 480px;
+      margin: 16px;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      overflow: auto;
+    }
+
+    /* 追加実装仕様書8.3節：画面フィット機能のズーム倍率をこの内側の入れ物にだけ適用する
+       （transform:scaleは子のleft/top座標をそのまま拡大縮小するため、issue.x/yの
+       座標系を変えずにズームを実現できる）。transform-origin:0 0で左上を基準に拡大縮小する。 */
+    .mindmap-canvas-inner {
+      position: relative;
+      transform-origin: 0 0;
+    }
+
+    /* 追加実装仕様書8.1節：インライン編集中のノードの入力欄。ノード本体の見た目
+       （角丸・文字サイズ）を崩さないよう、最小限の装飾に留める。 */
+    .mindmap-inline-edit-input {
+      font: inherit;
+      color: inherit;
+      background: rgba(255, 255, 255, .2);
+      border: 1.5px solid var(--color-white);
+      border-radius: 12px;
+      padding: 2px 8px;
+      width: 100px;
+      outline: none;
+    }
+
+    .mindmap-edge {
+      position: absolute;
+      height: 1px;
+      background: var(--color-border-dark);
+      transform-origin: 0 0;
+    }
+
+    .mindmap-node {
+      position: absolute;
+      padding: 5px 16px;
+      border-radius: 20px;
+      color: var(--color-white);
+      font-size: 12px;
+      white-space: nowrap;
+      box-shadow: var(--shadow-small);
+      transform: translate(-50%, -50%);
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .mindmap-node.is-dragging {
+      cursor: grabbing;
+      opacity: .85;
+      z-index: 10;
+    }
+
+    /* 折りたたみ中（子孫ノードを非表示にしている）ノードの見た目の目印。 */
+    .mindmap-node.is-collapsed-node {
+      border: 2px dashed var(--color-white);
+    }
+
+    /* マインドマップは他パネルよりノード配置の作業領域が必要なため、幅を広めにする。 */
+    .mindmap-slide-panel {
+      width: 900px;
+    }
+
+    /* 右クリックメニュー（モーダル・ダイアログ一覧P7）。位置はJSでtop/leftを指定する。 */
+    .mindmap-context-menu {
+      position: fixed;
+      z-index: 110;
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-medium);
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      min-width: 180px;
+    }
+
+    .mindmap-context-menu[hidden] {
+      display: none;
+    }
+
+    .mindmap-context-menu button {
+      text-align: left;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 4px;
+      background: none;
+      color: var(--color-text-dark);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .mindmap-context-menu button:hover {
+      background: var(--color-primary-light);
+    }
+
+    .panel-add-button {
+      margin: 12px 16px 0;
+      padding: 6px 12px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-standard);
+      background: var(--color-white);
+      color: var(--color-accent);
+      cursor: pointer;
+    }
+
+    .panel-add-button:hover {
+      background: var(--color-accent-hover);
+      color: var(--color-white);
+    }
+
+    .empty-state-message {
+      color: var(--color-text-light);
+      padding: 16px;
+    }
+
+    /* ガント本体が0件のとき、列（背景の縞模様）はそのまま描画した上に
+       メッセージだけを重ねて表示する（列自体を消さない）。 */
+    .gantt-empty-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      padding: 0;
+      white-space: nowrap;
+    }
+
+    /* ===== モーダル・ダイアログ一覧①：中央モーダル（UIデザイン仕様書2.3節） ===== */
+    /* 追加実装仕様書5章：モーダル共通デザインガイドライン（M1〜M4／タスク編集モーダル共通）。
+       ・オーバーレイの色・ぼかしはお手本ganttforge.htmlの.moverlay（rgba(17,24,39,.4)＋
+       　backdrop-filter:blur(4px)）に正確に合わせる（以前はアルファ値.5でぼかし無しだった）。
+       ・角丸はお手本の.modal（14px）に合わせる（内側の入力欄・スウォッチ等は
+       　従来通りvar(--radius-standard)＝8pxのまま統一し、外枠だけ変える）。
+       ・幅は420px→480pxに広げ、縦長になりがちな内容量に対して正方形に近い比率へ寄せる。 */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, .4);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay[hidden] {
+      display: none;
+    }
+
+    .modal-panel {
+      background: var(--color-white);
+      border-radius: 14px;
+      box-shadow: var(--shadow-large);
+      padding: 24px;
+      width: 480px;
+      max-width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .modal-panel h2 {
+      margin: 0 0 16px;
+      font-size: 15px;
+      color: var(--color-text-dark);
+    }
+
+    .modal-field {
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* 追加実装仕様書5章：関連する日付項目（開始日／終了日）を横1列にまとめる行。
+       中の.modal-fieldは幅を均等割りにし、margin-bottomは行自体に持たせる
+       （個々の.modal-fieldがmargin-bottomを持つと、行の下に二重の余白ができるため0にする）。 */
+    .modal-field-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .modal-field-row .modal-field {
+      flex: 1;
+      margin-bottom: 0;
+    }
+
+    .modal-field label {
+      font-size: 12px;
+      color: var(--color-text-mid);
+    }
+
+    .modal-field input[type="text"],
+    .modal-field input[type="date"],
+    .modal-field select,
+    .modal-field textarea {
+      padding: 9px 12px;
+      border: 1.5px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .modal-field input[type="text"]:focus,
+    .modal-field input[type="date"]:focus,
+    .modal-field select:focus,
+    .modal-field textarea:focus {
+        outline: none;
+        border-color: var(--color-accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .1);
+    }
+
+
+    .modal-color-palette {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .modal-color-swatch {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+
+    .modal-color-swatch.is-selected {
+      border-color: var(--color-text-dark);
+    }
+
+    /* M4：スケジュール編集モーダル内のコメント欄（既存スケジュールのみ表示） */
+    .modal-comment-list {
+      max-height: 160px;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      margin-bottom: 8px;
+    }
+
+    .modal-comment-list .panel-list-item {
+      padding: 6px 10px;
+    }
+
+    .modal-comment-post-form {
+      display: flex;
+      gap: 8px;
+    }
+
+    .modal-comment-post-form input {
+      flex: 1;
+    }
+
+    /* M3：マイルストーン管理モーダルの行（名前＋日付＋削除ボタン）。 */
+    #milestoneModalRowsContainer {
+      max-height: 40vh;
+      overflow-y: auto;
+      margin-bottom: 8px;
+    }
+
+    .modal-milestone-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .modal-milestone-row .modal-milestone-name-input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    /* M9：データ取込－差分比較モーダル。ストアごとにグループ化した一覧を持つため、
+       通常のモーダル（480px）より広い専用幅にする。:has()で対象を絞り、他モーダルの
+       幅には影響させない。 */
+    .modal-panel:has(.import-diff-list) {
+      width: 640px;
+    }
+
+    .import-diff-list {
+      max-height: 50vh;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-standard);
+      margin-bottom: 8px;
+    }
+
+    .import-diff-store-group + .import-diff-store-group {
+      border-top: 1px solid var(--color-border);
+    }
+
+    .import-diff-store-group h3 {
+      margin: 0;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--color-text-mid);
+      background: var(--color-surface-2);
+    }
+
+    .import-diff-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .import-diff-item:hover {
+      background: var(--color-surface-2);
+    }
+
+    .modal-button-primary {
+      padding: 6px 14px;
+      border-radius: var(--radius-standard);
+      border: 1px solid var(--color-accent);
+      background: var(--color-accent);
+      color: var(--color-white);
+      cursor: pointer;
+    }
+
+    .modal-button-secondary {
+      padding: 6px 14px;
+      border-radius: var(--radius-standard);
+      border: 1px solid var(--color-border-dark);
+      background: var(--color-white);
+      color: var(--color-text-mid);
+      cursor: pointer;
+    }
+
+    .wbs-row[data-schedule-id] {
+      cursor: pointer;
+    }
+
+    /* ===== モーダル・ダイアログ一覧②：右側スライドパネル（UIデザイン仕様書2.2節） =====
+       ガント画面（背後）を隠さず、画面右端からスライドインする。×またはヘッダーの同じ
+       ボタンをもう一度押すと閉じる。パネル幅は機能ごとに異なる想定（今回はタスク管理のみ実装）。 */
+    .slide-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 640px;
+      max-width: 92vw;
+      background: var(--color-white);
+      box-shadow: var(--shadow-large);
+      z-index: 90;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform .2s ease;
+      pointer-events: none;
+    }
+
+    /* UI差分表No.76：側面パネルの幅をドラッグで変更するハンドル。左端に薄く常設し、
+       ホバー/ドラッグ中だけアクセント色を表示する。initializePanelResizeHandlesで
+       全スライドパネルの先頭に動的挿入する（7パネル分HTMLへ書かない）。 */
+    .panel-resize-handle {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: ew-resize;
+      z-index: 1;
+      pointer-events: auto;
+    }
+
+    .panel-resize-handle:hover,
+    .panel-resize-handle.is-resizing {
+      background: var(--color-accent);
+    }
+
+    .slide-panel.is-open {
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    .slide-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    /* P3：即時メモパネルのように、見出しの隣に操作ボタンを1つ添えたい場合の下位ラッパー。
+       .slide-panel-header自体はjustify-content:space-betweenで「見出し側／×ボタン側」の
+       2箇所しか想定していないため、ここに複数要素をまとめて1つの子要素として渡す。 */
+    .slide-panel-header-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .slide-panel-header h2 {
+      margin: 0;
+      font-size: 15px;
+      color: var(--color-text-dark);
+    }
+
+    /* 追加実装仕様書10章：件数表示（例：「3件」）。見出しの隣に小さく添える。 */
+    .panel-count-badge {
+      font-size: 11px;
+      color: var(--color-text-light);
+    }
+
+    /* 見出しの右側（保存ボタン等）と×ボタンをまとめる下位ラッパー。
+       .slide-panel-header-title-groupと対になる、右側用の同じ考え方のラッパー。 */
+    .slide-panel-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .slide-panel-close-button {
+      border: none;
+      background: none;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      color: var(--color-text-mid);
+    }
+
+    .slide-panel-body {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .kanban-add-form {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px;
+      background: var(--color-white);
+      border: 1px dashed var(--color-border-dark);
+      border-radius: var(--radius-standard);
+    }
+
+    .kanban-add-form input,
+    .kanban-add-form select {
+      padding: 4px 6px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    .kanban-add-form-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .kanban-add-form-actions .kanban-add-submit-button {
+      flex: 1;
+    }
+
+    /* 追加実装仕様書6.1節：閉じている間だけ表示する「＋追加」トグルボタン
+       （押すとこの列の.kanban-add-formに差し替わる単発フォーム）。 */
+    .kanban-add-toggle-button {
+      width: 100%;
+      padding: 6px;
+      border: 1px dashed var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      background: none;
+      color: var(--color-text-light);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .kanban-add-toggle-button:hover {
+      background: var(--color-primary-light);
+      border-color: var(--color-accent);
+      color: var(--color-text-dark);
+    }
+
+    /* ===== P2〜P6：右側スライドパネル共通の一覧項目・入力欄スタイル ===== */
+    .panel-list-item {
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .panel-list-item-main {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .panel-list-item-meta {
+      color: var(--color-text-light);
+      font-size: 11px;
+    }
+
+    /* UI差分表No.73：スナップショット比較結果のインライン展開領域。 */
+    .snapshot-compare-result {
+      margin-top: 6px;
+      font-size: 12px;
+    }
+
+    .panel-list-item-actions {
+      display: flex;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+
+    /* 追加実装仕様書10章：スナップショット行の操作アイコン（«比較／⟲復元／🗑削除）は、
+       WBS行のホバーアイコン（.wbs-row-icons）と同じ考え方で、行にマウスを乗せた時だけ
+       表示する（常時表示の文字ボタンを廃止するため）。 */
+    .snapshot-item-icons {
+      opacity: 0;
+      transition: opacity .12s ease;
+    }
+
+    .panel-list-item:hover .snapshot-item-icons {
+      opacity: 1;
+    }
+
+    /* P3：即時メモの投稿欄（パネル下部固定） */
+    .quick-memo-input-area {
+      display: flex;
+      gap: 8px;
+      padding: 8px 16px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .quick-memo-input-area textarea {
+      flex: 1;
+      padding: 9px 12px;
+      border: 1.5px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    /* P4：メモパネルは左に一覧・右に編集エリアの2カラム構成 */
+    .memo-panel-body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .memo-list-column {
+      flex: 0 0 auto;
+      max-height: 40%;
+      overflow-y: auto;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .memo-list-item {
+      cursor: pointer;
+    }
+
+    .memo-list-item.is-selected {
+      background: var(--color-primary-light);
+    }
+
+    .memo-editor-column {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .memo-editor-column input[type="text"] {
+      padding: 9px 12px;
+      border: 1.5px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .memo-editor-column textarea {
+      flex: 1;
+      min-height: 240px;
+      padding: 8px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    /* 追加実装仕様書9.2節：メモ編集エリアの編集／プレビュー／分割タブ。 */
+    .memo-editor-tabs {
+      display: flex;
+      gap: 4px;
+    }
+
+    .memo-editor-preview {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-size: 13px;
+    }
+
+    /* サニタイズ済みMarkdownのレンダリング結果は見出し等が詰まって見えないよう最低限の余白だけ整える。 */
+    .memo-editor-preview :first-child {
+      margin-top: 0;
+    }
+
+    .memo-editor-split {
+      flex: 1;
+      display: flex;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .memo-editor-split-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    /* P5：コメント一覧はスケジュール単位でグルーピングする（見出しクリックで開閉） */
+    .comment-group-heading {
+      padding: 8px 16px 4px;
+      font-weight: 600;
+      color: var(--color-primary-navy);
+      background: var(--color-surface-2);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* UI差分表No.68：グループ見出しの折りたたみ表現。固定の下向き矢印1文字を、
+       開閉状態に応じてCSSトランジションで回転させる（グリフ切り替えではなく回転アニメーション）。 */
+    .cml-chevron {
+      display: inline-block;
+      transition: transform .15s ease;
+    }
+
+    .comment-group-heading.is-collapsed .cml-chevron {
+      transform: rotate(-90deg);
+    }
+
+    /* P6：変更履歴のフィルタタブ */
+    .changelog-filter-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .changelog-summary {
+      padding: 6px 16px;
+      font-size: 12px;
+      color: var(--color-text-light);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    /* 追加実装仕様書7章：コメントパネルの件数内訳（「N件のスケジュールにM件のコメント」）。
+       changelog-summaryと同じ見た目の帯だが、意味が異なるため専用クラスにする。 */
+    .comment-panel-summary {
+      padding: 6px 16px;
+      font-size: 12px;
+      color: var(--color-text-light);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .comment-panel-summary:empty {
+      display: none;
+    }
+
+    /* 追加実装仕様書7章：コメント0件時の空状態（お手本の💬アイコン＋文言に揃える）。 */
+    .comment-empty-state-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+
+    .changelog-action-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--color-white);
+    }
+
+    .changelog-action-badge.is-add {
+      background: var(--color-accent);
+    }
+
+    .changelog-action-badge.is-edit {
+      background: #D97706;
+    }
+
+    .changelog-action-badge.is-delete {
+      background: var(--color-danger);
+    }
+
+    /* UI差分表No.69：変更前後の値の色分け表示（お手本：.cl-old取り消し線・赤／.cl-new緑）。 */
+    .changelog-changes-list {
+      margin-top: 4px;
+      font-size: 11px;
+    }
+
+    .changelog-change-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: baseline;
+    }
+
+    .changelog-field-label {
+      color: var(--color-text-light);
+    }
+
+    .cl-old {
+      color: var(--color-danger);
+      text-decoration: line-through;
+    }
+
+    .cl-new {
+      color: #16A34A;
+    }
+
+    .changelog-change-arrow {
+      color: var(--color-text-light);
+    }
+
+    /* ===== 共通UI：トースト通知（UIデザイン仕様書2.4節） =====
+       画面右下に固定表示し、表示時は下からスライドイン、約2.8秒で自動的にスライドアウトして消える。
+       非表示時にdisplay:noneにしないのは、スライドイン/アウトのtransitionを効かせるため
+       （opacity/transformだけを切り替え、要素自体は常にDOMに存在させる）。 */
+    #toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      max-width: 360px;
+      padding: 12px 16px;
+      background: var(--color-text-dark);
+      color: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      font-size: 13px;
+      z-index: 200;
+      opacity: 0;
+      transform: translateY(16px);
+      pointer-events: none;
+      transition: opacity .25s ease, transform .25s ease;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。
+       position:fixedでevent.clientX/clientYにそのまま配置する（スクロール位置の
+       補正が不要になるため）。 */
+    .task-popup {
+      position: fixed;
+      z-index: 150;
+      width: 260px;
+      background: var(--color-white);
+      border-radius: var(--radius-standard);
+      box-shadow: var(--shadow-large);
+      padding: 12px;
+      font-size: 12px;
+    }
+
+    .task-popup-comment-section {
+      margin-top: 8px;
+      border-top: 1px solid var(--color-border);
+      padding-top: 8px;
+    }
+
+    .task-popup-comment-section .modal-comment-list {
+      max-height: 100px;
+    }
+
+    .task-popup[hidden] {
+      display: none;
+    }
+
+    .task-popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .task-popup-progress-track {
+      height: 6px;
+      background: var(--color-surface-3);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+
+    .task-popup-progress-fill {
+      height: 100%;
+      background: var(--color-accent);
+    }
+
+    .task-popup-progress-label {
+      font-size: 11px;
+      color: var(--color-text-light);
+      margin-bottom: 8px;
+    }
+
+    .task-popup-notes {
+      color: var(--color-text-mid);
+      white-space: pre-wrap;
+      max-height: 100px;
+      overflow-y: auto;
+    }
