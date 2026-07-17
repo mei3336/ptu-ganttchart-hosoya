@@ -1402,6 +1402,25 @@
       border-bottom: 1px solid var(--color-border);
     }
 
+    /* 追加実装仕様書7章：コメントパネルの件数内訳（「N件のスケジュールにM件のコメント」）。
+       changelog-summaryと同じ見た目の帯だが、意味が異なるため専用クラスにする。 */
+    .comment-panel-summary {
+      padding: 6px 16px;
+      font-size: 12px;
+      color: var(--color-text-light);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .comment-panel-summary:empty {
+      display: none;
+    }
+
+    /* 追加実装仕様書7章：コメント0件時の空状態（お手本の💬アイコン＋文言に揃える）。 */
+    .comment-empty-state-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+
     .changelog-action-badge {
       display: inline-block;
       padding: 1px 6px;
@@ -1687,12 +1706,17 @@
     </div>
   </aside>
 
-  <!-- P5：コメント一覧。プロジェクト内の全スケジュールに紐づくコメントをスケジュール単位で表示。 -->
+  <!-- P5：コメント一覧。プロジェクト内の全スケジュールに紐づくコメントをスケジュール単位で表示。
+       追加実装仕様書7章：件数表示（見出し右の「N件」、本文上のスケジュール別内訳）を追加。 -->
   <aside id="commentSlidePanel" class="slide-panel">
     <div class="slide-panel-header">
-      <h2>コメント</h2>
+      <div class="slide-panel-header-title-group">
+        <h2>コメント</h2>
+        <span id="commentCountBadge" class="panel-count-badge"></span>
+      </div>
       <button type="button" id="closeCommentPanelButton" class="slide-panel-close-button">×</button>
     </div>
+    <div id="commentPanelSummary" class="comment-panel-summary"></div>
     <div class="slide-panel-body">
       <div id="commentPanelBody"></div>
     </div>
@@ -5386,7 +5410,8 @@
     // 【結果】commentPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderCommentGroupsToHtml(commentGroups, collapsedScheduleIds) {
       if (commentGroups.length === 0) {
-        return '<p class="empty-state-message">コメントがありません。</p>';
+        // 追加実装仕様書7章：お手本の空状態表示（💬アイコン＋「コメントはまだありません」）に揃える。
+        return '<div class="empty-state-message"><div class="comment-empty-state-icon">💬</div>コメントはまだありません</div>';
       }
       return commentGroups
         .map(({ schedule, comments }) => {
@@ -5431,14 +5456,26 @@
       document.getElementById("commentPanelBody").innerHTML = bodyHtml;
     }
 
+    // 【前提】なし。
+    // 【処理】見出し右の件数バッジ（追加実装仕様書7章：「N件」）と、本文上の内訳
+    //   （「N件のスケジュールにM件のコメント」）を更新する。プロジェクト未選択・コメント0件の
+    //   場合はどちらも空文字にする（:emptyセレクタで内訳の帯自体を非表示にする）。
+    // 【結果】#commentCountBadge・#commentPanelSummaryの表示が更新される。
+    function updateCommentCountDisplays(scheduleGroupCount, totalCommentCount) {
+      document.getElementById("commentCountBadge").textContent = totalCommentCount === null ? "" : `${totalCommentCount}件`;
+      document.getElementById("commentPanelSummary").textContent =
+        totalCommentCount ? `${scheduleGroupCount}件のスケジュールに${totalCommentCount}件のコメント` : "";
+    }
+
     // 【前提】projectId はnull、または実在するプロジェクトのid。
     // 【処理】getSchedulesByProjectでスケジュールid集合を取得し、各idについて
     //   getCommentsByTaskで束ねてcommentGroupsを作る。投稿フォーム＋グルーピング一覧を
     //   両方描画する。
-    // 【結果】コメントパネルの表示が最新の状態に更新される。
+    // 【結果】コメントパネルの表示・件数表示が最新の状態に更新される。
     async function refreshCommentPanel(projectId) {
       if (!projectId) {
         applyCommentPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        updateCommentCountDisplays(0, null);
         return;
       }
       const scheduleList = await getSchedulesByProject(projectId);
@@ -5451,6 +5488,8 @@
       }
       const formHtml = scheduleList.length > 0 ? renderCommentPostFormToHtml(scheduleList) : "";
       applyCommentPanel(formHtml + renderCommentGroupsToHtml(commentGroups, collapsedCommentGroupScheduleIds));
+      const totalCommentCount = commentGroups.reduce((sum, group) => sum + group.comments.length, 0);
+      updateCommentCountDisplays(commentGroups.length, totalCommentCount);
     }
 
     // 【前提】scheduleId は見出しをクリックされたスケジュールのid。
