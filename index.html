@@ -88,51 +88,43 @@
     }
 
     /* ===== ヘッダー（基本設計書2.1節：2段構成） ===== */
-    /* 【設計判断：追加実装仕様書2.2節「横スクロールは実装しない」】
-       お手本自体が横スクロール可能な構造を持たないため、画面幅が狭い場合の対応は
-       横スクロールバーではなく折り返しにする。flex-wrap:wrapにして、あふれた分は
-       次の行へ折り返す（ヘッダーの高さはheightで固定せずmin-heightにし、折り返して
-       行数が増えた場合はその分ヘッダー自体が縦に伸びるようにする）。
-       子要素側のflex-shrink:0は維持する（先に文字が押し潰されるより先に折り返してほしい
-       ため。flexboxの既定挙動＝縮小優先のままだと、折り返す前にボタンの文字が読めなく
-       なるまで圧縮されてしまう）。 */
+    /* 【設計判断：追加実装仕様書2.2節「横スクロールは実装しない」＋ユーザー指示（折り返しは
+       せず、あふれたボタンはそのままでよい。ただし幅が狭まるにつれ、まずgapを詰めて
+       あふれを最小限にし、それでも狭ければ「日〜3か月」「開始〜状態」の2ブロックを
+       非表示にする）】
+       折り返し（flex-wrap:wrap）は行わず1行のまま維持する。横スクロールバーも出さず、
+       あふれた分はoverflow-x:hiddenで見えなくする（お手本にも横スクロールは無いため、
+       「折り返す・省略される」のうち「省略される」を選ぶ）。 */
     .app-header-primary,
     .app-header-secondary {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      flex-wrap: wrap;
-      row-gap: 6px;
-      padding: 6px 16px;
+      flex-wrap: nowrap;
+      overflow-x: hidden;
+      padding: 0 16px;
     }
 
     .app-header-primary {
-      min-height: var(--header-primary-height);
+      height: var(--header-primary-height);
       background: var(--color-white);
       border-bottom: 1px solid var(--color-border);
       box-shadow: var(--shadow-small);
     }
 
     .app-header-secondary {
-      min-height: var(--header-secondary-height);
+      height: var(--header-secondary-height);
       background: var(--color-surface-2);
       border-bottom: 1px solid var(--color-border);
       font-size: 12px;
     }
 
-    /* 【設計判断】flex-shrink:0のままだと、header-group自身が「中の全ボタンを1行に
-       並べた時の幅」のまま縮まず、ヘッダーの外側へはみ出してしまう（flex-wrap:wrapは
-       自分の外側の幅が実際に狭まった時にだけ内側の折り返しが働くため）。
-       min-width:0とflex-shrink（既定値=1）を許可してheader-group自身が縮められる
-       ようにすることで、中のボタン・button-group（どちらもflex-shrink:0で自分自身は
-       圧縮されない）が収まりきらなくなった分だけ次の行へ折り返すようになる。 */
     .header-group {
       display: flex;
       align-items: center;
       gap: 10px;
-      min-width: 0;
-      flex-wrap: wrap;
-      row-gap: 6px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
     }
 
     /* 「表示粒度（日/週/1ヶ月/3ヶ月）」「列トグル（開始/終了/状態）」のように、
@@ -142,6 +134,29 @@
       display: flex;
       gap: 4px;
       flex-shrink: 0;
+    }
+
+    /* 【設計判断：段階的な「詰め」処理】幅が狭まるにつれ、まずgap（ボタン同士の間隔）を
+       段階的に詰めて、あふれを最大限抑える。ボタン自体の文字は縮小・省略しない
+       （読めなくなるため）。.button-group本体の定義より後ろに置き、同じ詳細度の
+       ルール同士でも後勝ちのCSSカスケードで上書きされるようにする。 */
+    @media (max-width: 1500px) {
+      .header-group {
+        gap: 6px;
+      }
+      .button-group {
+        gap: 2px;
+      }
+    }
+
+    /* 【設計判断：段階的な「詰め」処理の最終段階】gapを詰めてもなお収まらない幅になったら、
+       「日〜3か月」（表示粒度）「開始〜状態」（列トグル）の2ブロックを丸ごと非表示にする
+       （ユーザー指示：この2ブロックは同時に隠してよく、どちらが先ということはない）。
+       この2ブロックは.button-groupクラスのみで実装されているため、そのままセレクタに使える。 */
+    @media (max-width: 1200px) {
+      .button-group {
+        display: none;
+      }
     }
 
     .app-logo {
@@ -1439,16 +1454,18 @@
       <button id="deleteProjectButton" class="toolbar-button" type="button">🗑 プロジェクト削除</button>
     </div>
     <div class="header-group">
+      <!-- 第1ヘッダー右側の並び順修正：Excel出力／PDF出力／データ出力／データ取込の順にする
+           （ユーザー指摘により、以前は逆順になっていた）。 -->
+      <!-- PDF出力・Excel出力はプロジェクト未選択時は使用不可（基本設計書2.1）。
+           初期のdisabled属性は、プロジェクトが1件も無い場合の初期表示用。実際の有効/無効は
+           switchToProject内のapplyReportButtonAvailabilityが選択状態に応じて切り替える。 -->
+      <button id="exportExcelButton" class="toolbar-button" type="button" disabled>Excel出力</button>
+      <button id="exportPdfButton" class="toolbar-button" type="button" disabled>PDF出力</button>
+      <button id="exportDataButton" class="toolbar-button" type="button">データ出力</button>
       <button id="importDataButton" class="toolbar-button" type="button">データ取込</button>
       <!-- 取込ファイル選択用の非表示input。importDataButtonのクリックでこちらをクリックさせる
            （<input type="file">自体をボタンとして見せると装飾の自由度が下がるため）。 -->
       <input id="importFileInput" type="file" accept="application/json" hidden>
-      <button id="exportDataButton" class="toolbar-button" type="button">データ出力</button>
-      <!-- PDF出力・Excel出力はプロジェクト未選択時は使用不可（基本設計書2.1）。
-           初期のdisabled属性は、プロジェクトが1件も無い場合の初期表示用。実際の有効/無効は
-           switchToProject内のapplyReportButtonAvailabilityが選択状態に応じて切り替える。 -->
-      <button id="exportPdfButton" class="toolbar-button" type="button" disabled>PDF出力</button>
-      <button id="exportExcelButton" class="toolbar-button" type="button" disabled>Excel出力</button>
     </div>
   </header>
 
@@ -1477,13 +1494,15 @@
       <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
     </div>
     <div class="header-group">
-      <button id="snapshotButton" class="toolbar-button" type="button">スナップショット</button>
-      <button id="quickMemoButton" class="toolbar-button" type="button">即時メモ</button>
-      <button id="memoButton" class="toolbar-button" type="button">メモ</button>
-      <button id="commentButton" class="toolbar-button" type="button">コメント</button>
-      <button id="changelogButton" class="toolbar-button" type="button">変更履歴</button>
-      <button id="switchToMindmapButton" class="toolbar-button" type="button">マインドマップ</button>
+      <!-- 第2ヘッダー右側の並び順修正：タスク管理／マインドマップ／変更履歴／コメント／メモ／
+           即時メモ／スナップショットの順にする（ユーザー指摘により、以前は逆順になっていた）。 -->
       <button id="switchToKanbanButton" class="toolbar-button" type="button">タスク管理</button>
+      <button id="switchToMindmapButton" class="toolbar-button" type="button">マインドマップ</button>
+      <button id="changelogButton" class="toolbar-button" type="button">変更履歴</button>
+      <button id="commentButton" class="toolbar-button" type="button">コメント</button>
+      <button id="memoButton" class="toolbar-button" type="button">メモ</button>
+      <button id="quickMemoButton" class="toolbar-button" type="button">即時メモ</button>
+      <button id="snapshotButton" class="toolbar-button" type="button">スナップショット</button>
     </div>
   </header>
 
