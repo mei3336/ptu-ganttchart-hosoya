@@ -49,12 +49,12 @@
       --wbs-panel-width: 520px;
       --header-primary-height: 52px;
       --header-secondary-height: 34px;
-      /* ガント本体の最低の高さ（グリッド背景・今日マーカーが画面の表示領域の下端まで
-         届くようにするため）。第1・第2ヘッダーとタイムラインヘッダーの高さを画面の高さ
-         から差し引いた残りとする。ロック帯（表示時のみ現れる）の高さはCSSだけでは
-         動的に計算できないため考慮していない（表示中は本体の下端がその分だけ画面外に
-         はみ出す可能性があるが、機能的な問題ではないため許容する）。 */
-      --gantt-body-min-height: calc(100vh - var(--header-primary-height) - var(--header-secondary-height) - var(--timeline-header-height));
+      /* 追加実装仕様書3.2節：ガント本体の高さH（ganttforge.html 1780〜1784行目で検証済み）。
+         H=Math.max(行数×44px, 500px)。行数が少ない間は500px固定、行数が増えると
+         「行数×44px」に切り替わって伸びていく（画面の表示領域の高さとは無関係の
+         固定値であることをお手本のソースで確認済み。以前はここを画面の残り高さの
+         計算式にしていたが、本書の検証結果に合わせて固定500pxへ修正する）。 */
+      --gantt-body-min-height: 500px;
     }
 
     * {
@@ -88,45 +88,51 @@
     }
 
     /* ===== ヘッダー（基本設計書2.1節：2段構成） ===== */
-    /* 【設計判断：ヘッダーは折り返さず、あふれたら行全体を横スクロールする】
-       画面幅が狭くなるとボタンが個別に折り返されて2段ヘッダーが何段にも積み重なる不具合と、
-       あふれたボタンが右端で見えなくなる不具合の両方を、同じ仕組みで解消する。
-       flex-wrap:nowrapで折り返しを禁止した上でoverflow-x:autoにすると、あふれた分は
-       消えも折り返しもせず、ヘッダー行だけが横スクロール可能になる（ページ全体は
-       スクロールしない。UIデザイン仕様書のレイアウトを保つため）。
-       子要素側にflex-shrink:0を持たせないと、スクロールの前にボタンが押し潰されて
-       文字が読めなくなる（flexboxの既定挙動＝縮小優先）ため、併せて指定する。 */
+    /* 【設計判断：追加実装仕様書2.2節「横スクロールは実装しない」】
+       お手本自体が横スクロール可能な構造を持たないため、画面幅が狭い場合の対応は
+       横スクロールバーではなく折り返しにする。flex-wrap:wrapにして、あふれた分は
+       次の行へ折り返す（ヘッダーの高さはheightで固定せずmin-heightにし、折り返して
+       行数が増えた場合はその分ヘッダー自体が縦に伸びるようにする）。
+       子要素側のflex-shrink:0は維持する（先に文字が押し潰されるより先に折り返してほしい
+       ため。flexboxの既定挙動＝縮小優先のままだと、折り返す前にボタンの文字が読めなく
+       なるまで圧縮されてしまう）。 */
     .app-header-primary,
     .app-header-secondary {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 16px;
-      overflow-x: auto;
-      overflow-y: hidden;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
+      row-gap: 6px;
+      padding: 6px 16px;
     }
 
     .app-header-primary {
-      height: var(--header-primary-height);
+      min-height: var(--header-primary-height);
       background: var(--color-white);
       border-bottom: 1px solid var(--color-border);
       box-shadow: var(--shadow-small);
     }
 
     .app-header-secondary {
-      height: var(--header-secondary-height);
+      min-height: var(--header-secondary-height);
       background: var(--color-surface-2);
       border-bottom: 1px solid var(--color-border);
       font-size: 12px;
     }
 
+    /* 【設計判断】flex-shrink:0のままだと、header-group自身が「中の全ボタンを1行に
+       並べた時の幅」のまま縮まず、ヘッダーの外側へはみ出してしまう（flex-wrap:wrapは
+       自分の外側の幅が実際に狭まった時にだけ内側の折り返しが働くため）。
+       min-width:0とflex-shrink（既定値=1）を許可してheader-group自身が縮められる
+       ようにすることで、中のボタン・button-group（どちらもflex-shrink:0で自分自身は
+       圧縮されない）が収まりきらなくなった分だけ次の行へ折り返すようになる。 */
     .header-group {
       display: flex;
       align-items: center;
       gap: 10px;
-      flex-shrink: 0;
-      flex-wrap: nowrap;
+      min-width: 0;
+      flex-wrap: wrap;
+      row-gap: 6px;
     }
 
     /* 「表示粒度（日/週/1ヶ月/3ヶ月）」「列トグル（開始/終了/状態）」のように、
@@ -215,10 +221,55 @@
     }
 
     /* ===== メイン作業領域：WBSパネル＋ガントチャート（UIデザイン仕様書2.1節） ===== */
+    #ganttPanel {
+      height: 100%;
+    }
+
     .main-workspace {
       display: flex;
       align-items: flex-start;
       height: 100%;
+    }
+
+    /* 追加実装仕様書2.1節：プロジェクト未選択時の空状態画面。.main-workspaceと同じ
+       高さいっぱいに広がり、アイコン・見出し・説明文・ボタンを中央に積み重ねる。 */
+    .gantt-empty-state {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+    }
+
+    /* 【設計判断】.main-workspace/.gantt-empty-stateはどちらもdisplay:flexを持つため、
+       JS側でhidden属性を付けるだけでは非表示にならない（属性セレクタ[hidden]よりクラス
+       セレクタの方が先に評価されるわけではないが、[hidden]単体のUA既定スタイルより
+       このクラスの指定の方が詳細度が高く上書きしてしまうため）。[hidden]と組み合わせた
+       セレクタで明示的にdisplay:noneへ戻す。 */
+    .main-workspace[hidden],
+    .gantt-empty-state[hidden] {
+      display: none;
+    }
+
+    .gantt-empty-state-icon {
+      font-size: 64px;
+      line-height: 1;
+      color: var(--color-border-dark);
+      margin-bottom: 8px;
+    }
+
+    .gantt-empty-state-title {
+      margin: 0;
+      font-size: 18px;
+      color: var(--color-text-dark);
+    }
+
+    .gantt-empty-state-description {
+      margin: 0;
+      color: var(--color-text-light);
+      font-size: 13px;
     }
 
     .wbs-panel {
@@ -466,6 +517,19 @@
     .gantt-day-column-bg.is-alt-period {
       background: var(--color-surface-3);
       opacity: .4;
+    }
+
+    /* 追加実装仕様書3.1節：日ごとの区切りを示す薄い縦線。JSがbackground-sizeに
+       pixelsPerDayを指定し、この1px幅の線をその間隔で繰り返し表示する。
+       クリック・ドラッグの妨げにならないよう装飾専用のレイヤーとして扱う。 */
+    .gantt-day-grid-lines {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      background-image: linear-gradient(to right, var(--color-surface-3) 1px, transparent 1px);
+      background-repeat: repeat-x;
+      pointer-events: none;
     }
 
     /* バーの視覚仕様（UIデザイン仕様書3章）：親行は太め・角丸大きめで行中央、
@@ -1432,6 +1496,15 @@
         <div class="gantt-scroll-area">
           <div id="ganttPanelBody"></div>
         </div>
+      </div>
+      <!-- 追加実装仕様書2.1節：プロジェクト未選択時の空状態画面。ガント本体エリア
+           （WBSパネル＋タイムライン部分）全体をこの表示に置き換える。ヘッダー2段は
+           通常通り表示したままでよいため、この画面はsection内・main-workspaceの外に置く。 -->
+      <div id="ganttEmptyState" class="gantt-empty-state" hidden>
+        <div class="gantt-empty-state-icon">☰</div>
+        <h2 class="gantt-empty-state-title">プロジェクトがありません</h2>
+        <p class="gantt-empty-state-description">新規プロジェクトを作成してガントチャートを始めましょう</p>
+        <button type="button" id="createFirstProjectButton" class="panel-add-button">＋最初のプロジェクトを作成</button>
       </div>
     </section>
   </main>
@@ -3839,6 +3912,18 @@
         })
         .join("");
 
+      // 追加実装仕様書3.1節：日ごとの区切りを示す薄い縦線。土日・祝日は上のperiodColumnsHtml
+      // （背景色）で別途表現するため、ここでは平日部分も含めた全ての日境界に線を引く。
+      // 【設計判断】日数ぶんのdivを1つずつ生成せず、repeating-linear-gradientで
+      // pixelsPerDayごとに1pxの縦線が繰り返される背景画像として1つのdivにまとめる
+      // （行数×日数のDOM要素が増えるのを避けるため）。「日」表示以外の粒度では1列が
+      // 複数日をまとめた列になり日境界の概念自体が薄れるため、この線は「日」表示の
+      // ときだけ描画する（背景色の土日判定と同じ条件分岐）。
+      const dayGridLinesHtml =
+        granularity === "day"
+          ? `<div class="gantt-day-grid-lines" style="width:${totalWidthPx}px;background-size:${pixelsPerDay}px 100%"></div>`
+          : "";
+
       const barsHtml = scheduleTreeRows
         .map(({ schedule, hasChildren }, rowIndex) => {
           const geometry = calculateBarGeometry(schedule, timelineStartDateString, pixelsPerDay);
@@ -3883,7 +3968,7 @@
       //   大きい方にする】CSSのmax()を使い、実データが画面より多ければ実データの高さ
       //   （＝縦スクロールが発生する）、少なければ画面の表示領域の下端まで
       //   （--gantt-body-min-height、:root定義）を採用する。
-      return `<div class="gantt-body" style="width:${totalWidthPx}px;min-height:max(${totalHeightPx}px, var(--gantt-body-min-height))">${periodColumnsHtml}${rowBackgroundsHtml}${barsHtml}${milestoneMarkersHtml}${todayMarkerHtml}${emptyMessageHtml}</div>`;
+      return `<div class="gantt-body" style="width:${totalWidthPx}px;min-height:max(${totalHeightPx}px, var(--gantt-body-min-height))">${periodColumnsHtml}${rowBackgroundsHtml}${dayGridLinesHtml}${barsHtml}${milestoneMarkersHtml}${todayMarkerHtml}${emptyMessageHtml}</div>`;
     }
 
     // 【前提】scheduleTreeRows・timelineDays・milestonesは上記各関数の戻り値・入力と同じ。
@@ -4100,15 +4185,27 @@
     //   rerenderWbsAndGanttFromCacheで両パネルを再描画する。
     // 【結果】WBS・ガント両パネルの表示が最新の状態に更新される。
     async function refreshGanttPanel(projectId) {
+      // 追加実装仕様書2.1節：プロジェクト未選択時は、ガント本体エリア（WBSパネル＋
+      // タイムライン部分）全体を専用の空状態画面に置き換える（ヘッダー2段は表示したまま）。
+      applyGanttEmptyStateVisibility(!projectId || !currentProjectObject);
       if (!projectId || !currentProjectObject) {
         applyWbsPanel("");
-        applyGanttPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        applyGanttPanel("");
         return;
       }
       const scheduleList = await getSchedulesByProject(projectId);
       currentScheduleTreeRows = buildScheduleTreeRows(scheduleList);
       currentTimelineStartDateString = currentProjectObject.startDate;
       rerenderWbsAndGanttFromCache();
+    }
+
+    // 【前提】なし。
+    // 【処理】プロジェクト未選択時の空状態画面（#ganttEmptyState）と、通常のWBS＋ガント表示
+    //   （.main-workspace）のどちらを表示するかを切り替える。
+    // 【結果】isEmptyがtrueなら空状態画面を表示し通常表示を隠す。falseならその逆。
+    function applyGanttEmptyStateVisibility(isEmpty) {
+      document.getElementById("ganttEmptyState").hidden = !isEmpty;
+      document.querySelector(".main-workspace").hidden = isEmpty;
     }
 
     // refreshGanttPanelと同じ考え方。対象はtasks・カンバンボード。
@@ -6806,6 +6903,9 @@
         switchToProject(event.target.value || null);
       });
       document.getElementById("createProjectButton").addEventListener("click", handleCreateProjectButtonClick);
+      // 追加実装仕様書2.1節：空状態画面の「＋最初のプロジェクトを作成」ボタンも、
+      // ヘッダーの「＋新規プロジェクト」と同じM1モーダルを開く。
+      document.getElementById("createFirstProjectButton").addEventListener("click", handleCreateProjectButtonClick);
       document.getElementById("exportDataButton").addEventListener("click", handleExportDataButtonClick);
       document.getElementById("importDataButton").addEventListener("click", () => {
         document.getElementById("importFileInput").click();
