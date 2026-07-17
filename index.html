@@ -18,6 +18,12 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <!-- 追加実装仕様書9.1節：メモのMarkdown対応（松＝CDNライブラリ＋サニタイズ方式）。
+       marked.js（Markdown→HTML変換）とDOMPurify（変換後HTMLのサニタイズ）を読み込む。
+       本アプリにはJSON出力・取込機能があり、エクスポートしたメモを他者がインポート・
+       プレビューする経路が存在するため、XSS対策として両方を組み合わせて使う。 -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
     /* ===== デザイントークン（UIデザイン仕様書1章の値をそのまま採用） ===== */
     :root {
@@ -44,8 +50,11 @@
       --radius-standard: 8px;
       --gantt-row-height: 44px;
       --gantt-header-height: 42px;
-      --timeline-header-height: 82px;
-      --milestone-marker-height: 20px;
+      /* 対応表No.42（追加実装仕様書4章）：マイルストーンのひし形＋名前ラベルは、月・日の
+         見出し行（合計82px＝40px＋42px）の上に専用の帯として追加するため、
+         タイムラインヘッダー全体の高さはその帯ぶんだけ伸びる。 */
+      --milestone-band-height: 24px;
+      --timeline-header-height: calc(var(--milestone-band-height) + 82px);
       --wbs-panel-width: 520px;
       --header-primary-height: 52px;
       --header-secondary-height: 34px;
@@ -456,7 +465,7 @@
 
     .gantt-month-label {
       position: absolute;
-      top: 0;
+      top: var(--milestone-band-height);
       height: 40px;
       display: flex;
       align-items: center;
@@ -468,9 +477,45 @@
       border-bottom: 1px solid var(--color-border);
     }
 
+    /* 対応表No.42（追加実装仕様書4章）：マイルストーンのひし形＋名前ラベルを表示する専用の帯。
+       バーが並ぶ行（.gantt-body）とは別レイヤーとして、月・日の見出し行の「上」に置く。 */
+    .gantt-milestone-band {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: var(--milestone-band-height);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .gantt-milestone-band-marker {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transform: translateX(-5px);
+    }
+
+    .gantt-milestone-band-diamond {
+      width: 10px;
+      height: 10px;
+      background: #D97706;
+      border-radius: 1px;
+      transform: rotate(45deg);
+      flex-shrink: 0;
+    }
+
+    .gantt-milestone-band-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #D97706;
+      white-space: nowrap;
+    }
+
     .gantt-day-column-header {
       position: absolute;
-      top: 40px;
+      top: calc(var(--milestone-band-height) + 40px);
       height: 42px;
       display: flex;
       align-items: center;
@@ -488,6 +533,13 @@
     .gantt-day-column-header.is-sunday {
       background: rgba(220, 38, 38, .09);
       color: var(--color-danger);
+    }
+
+    /* 追加実装仕様書1章：祝日の背景色（薄橙）。土＝薄青・日＝薄赤と同じ考え方で、
+       祝日は橙系の色（お手本ganttforge.htmlの.hc.hol/.ds.holに準拠）にする。 */
+    .gantt-day-column-header.is-holiday {
+      background: rgba(234, 88, 12, .12);
+      color: #C2410C;
     }
 
     .gantt-body {
@@ -526,6 +578,10 @@
 
     .gantt-day-column-bg.is-sunday {
       background: rgba(220, 38, 38, .05);
+    }
+
+    .gantt-day-column-bg.is-holiday {
+      background: rgba(234, 88, 12, .08);
     }
 
     /* 週/1ヶ月/3ヶ月表示では土日という概念が意味を持たないため、縞模様で列の区切りだけを示す。 */
@@ -606,12 +662,15 @@
       opacity: .55;
     }
 
+    /* 追加実装仕様書4章：マイルストーンの縦のガイド線。ひし形＋名前ラベルは
+       .gantt-milestone-band（タイムラインヘッダー側の専用帯）に移したため、ここでは
+       .gantt-body内を貫く縦線のみを描画する（点線→オレンジの実線に変更）。 */
     .gantt-milestone-marker {
       position: absolute;
       top: 0;
       bottom: 0;
       width: 0;
-      border-left: 1px dashed var(--color-border-dark);
+      border-left: 2px solid #D97706;
     }
 
     /* 「今日」を示す縦のハイライト線。マイルストーン線と同じくtop:0;bottom:0で
@@ -623,60 +682,6 @@
       width: 2px;
       background: var(--color-accent);
       z-index: 1;
-    }
-
-    .gantt-milestone-diamond {
-      position: absolute;
-      top: 6px;
-      width: var(--milestone-marker-height);
-      height: var(--milestone-marker-height);
-      background: #D97706;
-      transform: translateX(-10px) rotate(45deg);
-      border-radius: 2px;
-    }
-
-    /* UI差分表No.55：マイルストーンのカスタムツールチップ。ブラウザ標準title属性の代わりに
-       data-tooltip属性＋CSSの::after（content:attr()）で、矢印付きの吹き出しを実装する
-       （JS不要）。既定は非表示（opacity:0;visibility:hidden）にし、
-       .gantt-milestone-marker:hoverでフェードインさせる。 */
-    .gantt-milestone-marker::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      top: -8px;
-      left: -10px;
-      transform: translate(-50%, -100%);
-      background: #292524;
-      color: var(--color-white);
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      white-space: nowrap;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity .15s ease;
-      pointer-events: none;
-      z-index: 2;
-    }
-
-    .gantt-milestone-marker::before {
-      content: "";
-      position: absolute;
-      top: -8px;
-      left: -10px;
-      transform: translate(-50%, -100%) translateY(100%);
-      border: 4px solid transparent;
-      border-top-color: #292524;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity .15s ease;
-      pointer-events: none;
-      z-index: 2;
-    }
-
-    .gantt-milestone-marker:hover::after,
-    .gantt-milestone-marker:hover::before {
-      opacity: 1;
-      visibility: visible;
     }
 
     /* ===== カンバン（タスク管理） ===== */
@@ -769,6 +774,27 @@
       border: 1px solid var(--color-border);
       border-radius: var(--radius-standard);
       overflow: auto;
+    }
+
+    /* 追加実装仕様書8.3節：画面フィット機能のズーム倍率をこの内側の入れ物にだけ適用する
+       （transform:scaleは子のleft/top座標をそのまま拡大縮小するため、issue.x/yの
+       座標系を変えずにズームを実現できる）。transform-origin:0 0で左上を基準に拡大縮小する。 */
+    .mindmap-canvas-inner {
+      position: relative;
+      transform-origin: 0 0;
+    }
+
+    /* 追加実装仕様書8.1節：インライン編集中のノードの入力欄。ノード本体の見た目
+       （角丸・文字サイズ）を崩さないよう、最小限の装飾に留める。 */
+    .mindmap-inline-edit-input {
+      font: inherit;
+      color: inherit;
+      background: rgba(255, 255, 255, .2);
+      border: 1.5px solid var(--color-white);
+      border-radius: 12px;
+      padding: 2px 8px;
+      width: 100px;
+      outline: none;
     }
 
     .mindmap-edge {
@@ -1131,6 +1157,20 @@
       color: var(--color-text-dark);
     }
 
+    /* 追加実装仕様書10章：件数表示（例：「3件」）。見出しの隣に小さく添える。 */
+    .panel-count-badge {
+      font-size: 11px;
+      color: var(--color-text-light);
+    }
+
+    /* 見出しの右側（保存ボタン等）と×ボタンをまとめる下位ラッパー。
+       .slide-panel-header-title-groupと対になる、右側用の同じ考え方のラッパー。 */
+    .slide-panel-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .slide-panel-close-button {
       border: none;
       background: none;
@@ -1196,6 +1236,18 @@
       display: flex;
       gap: 4px;
       flex: 0 0 auto;
+    }
+
+    /* 追加実装仕様書10章：スナップショット行の操作アイコン（«比較／⟲復元／🗑削除）は、
+       WBS行のホバーアイコン（.wbs-row-icons）と同じ考え方で、行にマウスを乗せた時だけ
+       表示する（常時表示の文字ボタンを廃止するため）。 */
+    .snapshot-item-icons {
+      opacity: 0;
+      transition: opacity .12s ease;
+    }
+
+    .panel-list-item:hover .snapshot-item-icons {
+      opacity: 1;
     }
 
     /* P3：即時メモの投稿欄（パネル下部固定） */
@@ -1265,6 +1317,40 @@
       font-family: inherit;
       font-size: 13px;
       resize: vertical;
+    }
+
+    /* 追加実装仕様書9.2節：メモ編集エリアの編集／プレビュー／分割タブ。 */
+    .memo-editor-tabs {
+      display: flex;
+      gap: 4px;
+    }
+
+    .memo-editor-preview {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+      border: 1px solid var(--color-border-dark);
+      border-radius: var(--radius-standard);
+      font-size: 13px;
+    }
+
+    /* サニタイズ済みMarkdownのレンダリング結果は見出し等が詰まって見えないよう最低限の余白だけ整える。 */
+    .memo-editor-preview :first-child {
+      margin-top: 0;
+    }
+
+    .memo-editor-split {
+      flex: 1;
+      display: flex;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .memo-editor-split-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
 
     /* P5：コメント一覧はスケジュール単位でグルーピングする（見出しクリックで開閉） */
@@ -1540,14 +1626,20 @@
     </div>
   </aside>
 
-  <!-- P2：スナップショット一覧。保存・一覧・削除のみ（復元・比較は別工程）。 -->
+  <!-- P2：スナップショット一覧。保存・一覧・削除・復元・比較。追加実装仕様書10章：
+       保存ボタンは見出し内に一本化し、復元・比較は行ホバー時のアイコンに一本化する。 -->
   <aside id="snapshotSlidePanel" class="slide-panel">
     <div class="slide-panel-header">
-      <h2>スナップショット</h2>
-      <button type="button" id="closeSnapshotPanelButton" class="slide-panel-close-button">×</button>
+      <div class="slide-panel-header-title-group">
+        <h2>スナップショット</h2>
+        <span id="snapshotCountBadge" class="panel-count-badge"></span>
+      </div>
+      <div class="slide-panel-header-actions">
+        <button id="saveSnapshotButton" class="toolbar-button" type="button">保存</button>
+        <button type="button" id="closeSnapshotPanelButton" class="slide-panel-close-button">×</button>
+      </div>
     </div>
     <div class="slide-panel-body">
-      <button id="saveSnapshotButton" class="panel-add-button" type="button">＋ スナップショットを保存</button>
       <div id="snapshotPanelBody"></div>
     </div>
   </aside>
@@ -1625,6 +1717,7 @@
     </div>
     <div class="slide-panel-body">
       <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
+      <button id="mindmapFitViewButton" class="toolbar-button" type="button">画面フィット</button>
       <div id="mindmapPanelBody"></div>
     </div>
   </aside>
@@ -3100,6 +3193,10 @@
     // 折りたたまれているマインドマップのissueidの集合。collapsedScheduleIdsと同じ理由で
     // DB非保存の画面上だけの一時状態にする。
     const collapsedMindmapIssueIds = new Set();
+    // 追加実装仕様書8.1節：インライン編集中（タイトル未確定）のissueid。編集中でなければnull。
+    let mindmapIssueIdPendingInlineEdit = null;
+    // インライン編集の入力欄がEscapeでキャンセルされたことを、続くblurイベントへ伝えるフラグ。
+    let mindmapInlineEditCancelledByEscape = false;
     // P5コメントパネルで折りたたまれているスケジュールidの集合。collapsedScheduleIdsと
     // 同じ理由でDB非保存の画面上だけの一時状態にする。
     const collapsedCommentGroupScheduleIds = new Set();
@@ -3264,7 +3361,9 @@
     // 【前提】startDateString <= endDateString（"YYYY-MM-DD"形式）であること。
     //   プロジェクトのendDateがstartDateより前という既知の非整合（基本設計書1.3節No.1相当の
     //   プロジェクト側バリデーション無し仕様）の場合でも、最低1日分は描画できるようにする。
-    // 【処理】startからendまでの日数分、各日の情報（日付文字列・年月・曜日・週末か）を列挙する。
+    // 【処理】startからendまでの日数分、各日の情報（日付文字列・年月・曜日・日種別）を列挙する。
+    //   日種別（dayType）はcalculateDayTypeが返す「祝日 > 日曜 > 土曜 > 平日」の判定結果
+    //   （追加実装仕様書1章：土日だけでなく祝日もタイムライン背景色の判定に使うため）。
     // 【結果】タイムライン列として左から順に描画できる配列を返す。
     function buildGanttTimelineDays(startDateString, endDateString) {
       const startTimestamp = parseDateStringToUtcTimestamp(startDateString);
@@ -3273,14 +3372,14 @@
 
       const timelineDays = [];
       for (let dayOffset = 0; dayOffset < totalDayCount; dayOffset++) {
-        const currentDate = new Date(startTimestamp + dayOffset * MILLISECONDS_PER_DAY);
-        const dayOfWeek = currentDate.getUTCDay();
+        const currentTimestamp = startTimestamp + dayOffset * MILLISECONDS_PER_DAY;
+        const currentDate = new Date(currentTimestamp);
+        const dateString = formatUtcTimestampToDateString(currentTimestamp);
         timelineDays.push({
           year: currentDate.getUTCFullYear(),
           month: currentDate.getUTCMonth() + 1,
           dayOfMonth: currentDate.getUTCDate(),
-          isSaturday: dayOfWeek === 6,
-          isSunday: dayOfWeek === 0,
+          dayType: calculateDayType(dateString, currentDate.getUTCDay()),
         });
       }
       return timelineDays;
@@ -3293,6 +3392,93 @@
       const targetTimestamp = parseDateStringToUtcTimestamp(targetDateString);
       const startTimestamp = parseDateStringToUtcTimestamp(timelineStartDateString);
       return Math.round((targetTimestamp - startTimestamp) / MILLISECONDS_PER_DAY);
+    }
+
+    // 【前提】utcTimestamp は parseDateStringToUtcTimestampと同じ基準（UTC深夜0時）のミリ秒値。
+    // 【処理】parseDateStringToUtcTimestampの逆変換として、"YYYY-MM-DD"形式の文字列を組み立てる。
+    // 【結果】UTC基準の日付文字列を返す。
+    function formatUtcTimestampToDateString(utcTimestamp) {
+      const date = new Date(utcTimestamp);
+      const padToTwoDigits = (value) => String(value).padStart(2, "0");
+      return `${date.getUTCFullYear()}-${padToTwoDigits(date.getUTCMonth() + 1)}-${padToTwoDigits(date.getUTCDate())}`;
+    }
+
+    // ===== 追加実装仕様書1章：営業日・祝日カレンダー =====
+    // 【設計判断：竹（忠実再現）】お手本ganttforge.html 1435〜1456行目の祝日データを
+    //   そのまま踏襲し、2024年〜2027年分のみをハードコードする。2028年以降の日付は
+    //   このSetに含まれないため祝日として扱われず、土日以外は平日扱いになる。
+    //   これは既知の制限であり、無理に年数を拡張しない（追加実装仕様書1.1節の方針）。
+    const JAPANESE_PUBLIC_HOLIDAYS = new Set([
+      // 2024年
+      "2024-01-01", "2024-01-08", "2024-02-11", "2024-02-12", "2024-02-23",
+      "2024-03-20", "2024-04-29", "2024-05-03", "2024-05-04", "2024-05-05", "2024-05-06",
+      "2024-07-15", "2024-08-11", "2024-08-12", "2024-09-16", "2024-09-22", "2024-09-23",
+      "2024-10-14", "2024-11-03", "2024-11-04", "2024-11-23",
+      // 2025年
+      "2025-01-01", "2025-01-13", "2025-02-11", "2025-02-23", "2025-02-24",
+      "2025-03-20", "2025-04-29", "2025-05-03", "2025-05-04", "2025-05-05", "2025-05-06",
+      "2025-07-21", "2025-08-11", "2025-09-15", "2025-09-21", "2025-09-22", "2025-09-23",
+      "2025-10-13", "2025-11-03", "2025-11-23", "2025-11-24",
+      // 2026年
+      "2026-01-01", "2026-01-12", "2026-02-11", "2026-02-23",
+      "2026-03-20", "2026-04-29", "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06",
+      "2026-07-20", "2026-08-11", "2026-09-21", "2026-09-22", "2026-09-23",
+      "2026-10-12", "2026-11-03", "2026-11-23",
+      // 2027年
+      "2027-01-01", "2027-01-11", "2027-02-11", "2027-02-23",
+      "2027-03-21", "2027-03-22", "2027-04-29", "2027-05-03", "2027-05-04", "2027-05-05",
+      "2027-07-19", "2027-08-11", "2027-09-20", "2027-09-21", "2027-09-23",
+      "2027-10-11", "2027-11-03", "2027-11-23",
+    ]);
+
+    // 【前提】dateString は "YYYY-MM-DD" 形式。
+    // 【処理】JAPANESE_PUBLIC_HOLIDAYSに含まれるかを判定する。
+    // 【結果】祝日ならtrue。
+    function isJapaneseHoliday(dateString) {
+      return JAPANESE_PUBLIC_HOLIDAYS.has(dateString);
+    }
+
+    // 【前提】dateString は "YYYY-MM-DD" 形式。dayOfWeekNumber は0(日)〜6(土)。
+    // 【処理】優先順位「祝日 > 日曜 > 土曜 > 平日」で1つの日種別を判定する
+    //   （追加実装仕様書1.2節。用途：タイムライン背景色の判定＝土は薄青／日は薄赤／祝は薄橙）。
+    // 【結果】"holiday" | "sunday" | "saturday" | null を返す。
+    function calculateDayType(dateString, dayOfWeekNumber) {
+      if (isJapaneseHoliday(dateString)) return "holiday";
+      if (dayOfWeekNumber === 0) return "sunday";
+      if (dayOfWeekNumber === 6) return "saturday";
+      return null;
+    }
+
+    // 【前提】dayType は calculateDayTypeの戻り値。
+    // 【処理】タイムライン見出し・グリッド背景の両方で共通して使う、日種別→CSSクラス名の
+    //   対応表（同じ変換を2箇所に重複させないための単純なラッパー）。
+    // 【結果】対応するCSSクラス名。dayTypeがnull（平日）なら空文字列。
+    function calculateDayTypeBackgroundClassName(dayType) {
+      if (dayType === "holiday") return "is-holiday";
+      if (dayType === "sunday") return "is-sunday";
+      if (dayType === "saturday") return "is-saturday";
+      return "";
+    }
+
+    // 【前提】startDateString <= endDateString（"YYYY-MM-DD"形式）。どちらかが空、または
+    //   startDateStringがendDateStringより後の場合は0を返す（呼び出し側の未入力・不整合を
+    //   許容するため、エラーにはしない）。
+    // 【処理】開始日から終了日まで1日ずつ走査し、土日・祝日を除いた日数を数える
+    //   （追加実装仕様書1.3節：お手本と同じ単純な走査方式でよい）。
+    // 【結果】営業日数（整数）。
+    function calculateBusinessDayCount(startDateString, endDateString) {
+      if (!startDateString || !endDateString) return 0;
+      const startTimestamp = parseDateStringToUtcTimestamp(startDateString);
+      const endTimestamp = parseDateStringToUtcTimestamp(endDateString);
+      if (startTimestamp > endTimestamp) return 0;
+
+      let businessDayCount = 0;
+      for (let timestamp = startTimestamp; timestamp <= endTimestamp; timestamp += MILLISECONDS_PER_DAY) {
+        const dayOfWeekNumber = new Date(timestamp).getUTCDay();
+        const dateString = formatUtcTimestampToDateString(timestamp);
+        if (calculateDayType(dateString, dayOfWeekNumber) === null) businessDayCount++;
+      }
+      return businessDayCount;
     }
 
     // ===== H4：Excel出力（exportExcel） =====
@@ -3657,6 +3843,236 @@
       return { leftPx: fromX, topPx: fromY, widthPx: lengthPx, angleDeg };
     }
 
+    // ===== 追加実装仕様書8.3節：マインドマップの自動レイアウト計算 =====
+    // 【設計判断】お手本ganttforge.html mmAutoLayout（3114〜3143行目）を踏襲する。
+    //   ただしお手本は「ドラッグで手動配置した後は上書きしない」ための_manualフラグを
+    //   持つが、本書8.3節の指示「ドラッグによる手動配置を上書きする形で毎回再計算される」
+    //   の通り、本実装はそのフラグを持たず、呼び出すたびに全ノードの座標を計算結果で
+    //   上書きする（お手本より単純化した仕様として意図的に採用）。
+
+    // ノードの深さ（depthLevel）別の想定高さ（お手本のnodeH関数に相当）。
+    function calculateMindmapNodeHeight(depthLevel) {
+      if (depthLevel === 0) return 44;
+      if (depthLevel === 1) return 32;
+      return 28;
+    }
+
+    // レイアウト計算時、ノードの想定高さに足す余白（お手本のvgapに相当）。
+    const MINDMAP_LAYOUT_VERTICAL_GAP_PX = 8;
+
+    // 深さ（depthLevel）別の親子間の水平間隔（お手本のxOffに相当）。
+    function calculateMindmapHorizontalOffset(depthLevel) {
+      if (depthLevel === 0) return 200;
+      if (depthLevel === 1) return 180;
+      return 150;
+    }
+
+    // 新規ノードが画面の見えない位置（マイナス座標）に配置されないための基準点。
+    // お手本は画面中央を(0,0)として_mmPanで合わせているが、本アプリのキャンバスは
+    // 素朴なabsolute配置＋overflow:autoスクロールのため、座標そのものを正の範囲に収める。
+    const MINDMAP_LAYOUT_BASE_X = 60;
+    const MINDMAP_LAYOUT_BASE_Y = 60;
+
+    // 【前提】issueList は同一プロジェクト内のissue全件（親子関係はparentNodeIdで表現）。
+    // 【処理】parentNodeId→直接の子issue配列のMapを組み立てる。
+    // 【結果】Map<issueId, issue[]>を返す（子を持たないissueはキーとして現れない）。
+    function buildMindmapChildIssuesByParentId(issueList) {
+      const childIssuesByParentId = new Map();
+      for (const issue of issueList) {
+        if (issue.parentNodeId === null || issue.parentNodeId === undefined) continue;
+        if (!childIssuesByParentId.has(issue.parentNodeId)) {
+          childIssuesByParentId.set(issue.parentNodeId, []);
+        }
+        childIssuesByParentId.get(issue.parentNodeId).push(issue);
+      }
+      return childIssuesByParentId;
+    }
+
+    // 【前提】issueId はルートissueのid。childIssuesByParentId は上記の戻り値。
+    // 【処理】ルートを深さ0として、子孫issueの深さ（depthLevel）を再帰的に割り当てる。
+    // 【結果】Map<issueId, depthLevel>を返す。
+    function assignMindmapDepthLevels(rootIssueId, childIssuesByParentId) {
+      const depthByIssueId = new Map();
+      function assignDepth(issueId, depthLevel) {
+        depthByIssueId.set(issueId, depthLevel);
+        for (const childIssue of childIssuesByParentId.get(issueId) || []) {
+          assignDepth(childIssue.id, depthLevel + 1);
+        }
+      }
+      assignDepth(rootIssueId, 0);
+      return depthByIssueId;
+    }
+
+    // 【前提】issueId は対象issueのid。他の引数は上記関数の戻り値。subtreeHeightByIssueId は
+    //   計算結果を書き込む先（再帰呼び出し全体で使い回す）。
+    // 【処理】ノード自身とその子孫全体が縦方向に必要とする高さを再帰的に計算する
+    //   （お手本mmAutoLayoutのcalcSizeに相当）。
+    // 【結果】このノードに必要な高さ（px）を返す。subtreeHeightByIssueIdに全ノード分書き込む。
+    function calculateMindmapSubtreeHeight(issueId, childIssuesByParentId, depthByIssueId, subtreeHeightByIssueId) {
+      const childIssues = childIssuesByParentId.get(issueId) || [];
+      const ownNodeHeight = calculateMindmapNodeHeight(depthByIssueId.get(issueId));
+      if (childIssues.length === 0) {
+        const height = ownNodeHeight + MINDMAP_LAYOUT_VERTICAL_GAP_PX;
+        subtreeHeightByIssueId.set(issueId, height);
+        return height;
+      }
+      let totalChildHeight = 0;
+      for (const childIssue of childIssues) {
+        totalChildHeight += calculateMindmapSubtreeHeight(childIssue.id, childIssuesByParentId, depthByIssueId, subtreeHeightByIssueId);
+      }
+      const height = Math.max(totalChildHeight, ownNodeHeight + MINDMAP_LAYOUT_VERTICAL_GAP_PX);
+      subtreeHeightByIssueId.set(issueId, height);
+      return height;
+    }
+
+    // 【前提】issueId・x・y は配置起点。subtreeHeightByIssueId は
+    //   calculateMindmapSubtreeHeightで計算済み。positionByIssueId は書き込み先。
+    // 【処理】親を起点に、子ノードを縦方向へ均等配置する（お手本mmAutoLayoutのlayout()に
+    //   相当）。子ノード群の合計高さぶんを中心そろえで振り分け、深さに応じた水平間隔で
+    //   右へ配置する。
+    // 【結果】positionByIssueIdに{x,y}が書き込まれる（戻り値なし）。
+    function layoutMindmapSubtree(issueId, x, y, childIssuesByParentId, depthByIssueId, subtreeHeightByIssueId, positionByIssueId) {
+      positionByIssueId.set(issueId, { x, y });
+      const childIssues = childIssuesByParentId.get(issueId) || [];
+      if (childIssues.length === 0) return;
+      const horizontalOffset = calculateMindmapHorizontalOffset(depthByIssueId.get(issueId));
+      const totalChildHeight = childIssues.reduce((sum, childIssue) => sum + subtreeHeightByIssueId.get(childIssue.id), 0);
+      let currentY = y - totalChildHeight / 2;
+      for (const childIssue of childIssues) {
+        const childSubtreeHeight = subtreeHeightByIssueId.get(childIssue.id);
+        layoutMindmapSubtree(
+          childIssue.id,
+          x + horizontalOffset,
+          currentY + childSubtreeHeight / 2,
+          childIssuesByParentId,
+          depthByIssueId,
+          subtreeHeightByIssueId,
+          positionByIssueId
+        );
+        currentY += childSubtreeHeight;
+      }
+    }
+
+    // 【前提】issueList は同一プロジェクト内のissue全件。ルートissue（parentNodeIdが無い行）が
+    //   1件以上存在すること（無ければ空のMapを返す）。
+    // 【処理】最初に見つかったルートissueを起点に、親ノードを起点として子ノードを再帰的に
+    //   均等配置するツリーレイアウトを計算する（追加実装仕様書8.3節：新規実装）。
+    //   計算結果は全ノードの最小x/yがMINDMAP_LAYOUT_BASE_X/Yになるよう平行移動し、
+    //   マイナス座標（画面外）に配置されるノードが出ないようにする。
+    // 【結果】issueId→{x,y} のMapを返す。ルートissueが無ければ空のMapを返す
+    //   （ルート以外から辿れない孤立ノードの座標もこのMapには含まれない＝更新されない）。
+    function calculateMindmapAutoLayoutPositions(issueList) {
+      const positionByIssueId = new Map();
+      const rootIssue = issueList.find((issue) => issue.parentNodeId === null || issue.parentNodeId === undefined);
+      if (!rootIssue) return positionByIssueId;
+
+      const childIssuesByParentId = buildMindmapChildIssuesByParentId(issueList);
+      const depthByIssueId = assignMindmapDepthLevels(rootIssue.id, childIssuesByParentId);
+      const subtreeHeightByIssueId = new Map();
+      calculateMindmapSubtreeHeight(rootIssue.id, childIssuesByParentId, depthByIssueId, subtreeHeightByIssueId);
+      layoutMindmapSubtree(rootIssue.id, 0, 0, childIssuesByParentId, depthByIssueId, subtreeHeightByIssueId, positionByIssueId);
+
+      let minX = Infinity;
+      let minY = Infinity;
+      for (const position of positionByIssueId.values()) {
+        minX = Math.min(minX, position.x);
+        minY = Math.min(minY, position.y);
+      }
+      const offsetX = MINDMAP_LAYOUT_BASE_X - minX;
+      const offsetY = MINDMAP_LAYOUT_BASE_Y - minY;
+      for (const [issueId, position] of positionByIssueId) {
+        positionByIssueId.set(issueId, { x: position.x + offsetX, y: position.y + offsetY });
+      }
+      return positionByIssueId;
+    }
+
+    // 【前提】projectId は実在するプロジェクトのid。
+    // 【処理】そのプロジェクトの全issueを取得し、calculateMindmapAutoLayoutPositionsで
+    //   再計算した座標をDBへ書き戻す（追加実装仕様書8.3節：ノード追加・削除のたびに呼び出す）。
+    // 【結果】ルートから辿れる全issueのx/yが最新のツリーレイアウトに更新される。
+    async function applyMindmapAutoLayout(projectId) {
+      const issueList = await getIssuesByProject(projectId);
+      const positionByIssueId = calculateMindmapAutoLayoutPositions(issueList);
+      await Promise.all(
+        issueList
+          .filter((issue) => positionByIssueId.has(issue.id))
+          .map((issue) => {
+            const position = positionByIssueId.get(issue.id);
+            return addIssue({ ...issue, x: position.x, y: position.y });
+          })
+      );
+    }
+
+    // 【前提】issueId は対象issueのid。issueList は同一プロジェクト内のissue全件。
+    // 【処理】parentNodeIdを根まで辿り、ルートを0とした深さを数える。
+    // 【結果】depthLevel（整数）。issueIdが見つからない場合は0を返す。
+    function calculateIssueDepthLevel(issueId, issueList) {
+      const issueById = new Map(issueList.map((issue) => [issue.id, issue]));
+      let depthLevel = 0;
+      let currentIssue = issueById.get(issueId);
+      while (currentIssue && currentIssue.parentNodeId !== null && currentIssue.parentNodeId !== undefined) {
+        depthLevel++;
+        currentIssue = issueById.get(currentIssue.parentNodeId);
+      }
+      return depthLevel;
+    }
+
+    // ===== 追加実装仕様書8.3節：画面フィット =====
+    // 現在のズーム倍率（1が等倍）。プロジェクトを切り替えるたびswitchToProjectでリセットする。
+    let mindmapZoomLevel = 1;
+    // 画面フィット時、ノードがキャンバスの端にぴったり付かないようにする余白。
+    const MINDMAP_FIT_VIEW_PADDING_PX = 120;
+    const MINDMAP_FIT_VIEW_MIN_ZOOM = 0.3;
+    const MINDMAP_FIT_VIEW_MAX_ZOOM = 1.5;
+
+    // 【前提】issueList は同一プロジェクト内のissue全件（x/y座標を持つ）。
+    // 【処理】全ノードのx/y座標の範囲（bounding box）を求める。
+    // 【結果】{minX, maxX, minY, maxY}。issueListが空ならnullを返す。
+    function calculateMindmapBoundingBox(issueList) {
+      if (issueList.length === 0) return null;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const issue of issueList) {
+        minX = Math.min(minX, issue.x);
+        maxX = Math.max(maxX, issue.x);
+        minY = Math.min(minY, issue.y);
+        maxY = Math.max(maxY, issue.y);
+      }
+      return { minX, maxX, minY, maxY };
+    }
+
+    // 【前提】currentSelectedProjectIdが設定済みであること。
+    // 【処理】全ノードのbounding boxと表示領域の大きさから、全ノードが収まるズーム倍率を
+    //   計算し、スクロール位置をbounding boxの中心に合わせる（追加実装仕様書8.3節：
+    //   お手本ganttforge.html mmFitViewと同じ考え方のボタン操作として新規実装する）。
+    // 【結果】mindmapZoomLevelが更新され、キャンバスが再描画・再スクロールされる。
+    async function handleMindmapFitViewButtonClick() {
+      if (!currentSelectedProjectId) return;
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const boundingBox = calculateMindmapBoundingBox(issueList);
+      if (!boundingBox) return;
+
+      const canvasElement = document.querySelector(".mindmap-canvas");
+      const viewportWidth = canvasElement.clientWidth;
+      const viewportHeight = canvasElement.clientHeight;
+      const boundingWidth = boundingBox.maxX - boundingBox.minX + MINDMAP_FIT_VIEW_PADDING_PX * 2;
+      const boundingHeight = boundingBox.maxY - boundingBox.minY + MINDMAP_FIT_VIEW_PADDING_PX * 2;
+
+      mindmapZoomLevel = Math.max(
+        MINDMAP_FIT_VIEW_MIN_ZOOM,
+        Math.min(MINDMAP_FIT_VIEW_MAX_ZOOM, viewportWidth / boundingWidth, viewportHeight / boundingHeight)
+      );
+
+      applyMindmapPanel(renderMindmapCanvasToHtml(issueList, collapsedMindmapIssueIds, mindmapIssueIdPendingInlineEdit, mindmapZoomLevel));
+
+      const centerX = (boundingBox.minX + boundingBox.maxX) / 2;
+      const centerY = (boundingBox.minY + boundingBox.maxY) / 2;
+      canvasElement.scrollLeft = centerX * mindmapZoomLevel - viewportWidth / 2;
+      canvasElement.scrollTop = centerY * mindmapZoomLevel - viewportHeight / 2;
+    }
+
     // 【前提】projectList はプロジェクト全件。selectedProjectId は現在<select>に選ばせたいid。
     // 【処理】<option>タグのHTML文字列を組み立てる（DOMには触れない）。
     // 【結果】<select>のinnerHTMLにそのまま入れられるHTML文字列を返す。
@@ -3857,12 +4273,24 @@
     }
 
     // 【前提】timelineDays は buildGanttTimelineDays の戻り値。granularity は表示粒度。
+    //   milestones は project.milestones。timelineStartDateString は基準日（1日目の日付）。
     // 【処理】buildGanttTimelineHeaderGroupsで1段目・2段目の見出しグループを求め、
     //   それぞれをHTML文字列化する（UIデザイン仕様書1.3節：タイムラインヘッダー高さ82px＝
     //   1段目40px＋2段目42px相当として配分）。土日の色分けは「日」表示のときのみ意味を持つ。
+    // 【設計判断：マイルストーンのひし形＋名前ラベルは月・日の見出し行の「上」に専用の帯として
+    //   描画する（追加実装仕様書4章）】ガント本体（.gantt-body）内はバーが並ぶレイヤーのため、
+    //   そこにひし形を重ねると視認性が落ちる。ヘッダーと本体は同じ横スクロールコンテナの中に
+    //   あるため、calculateMilestoneMarkerPositionsが返すleftPxはどちらでもそのまま使える。
     // 【結果】gantt-timeline-headerのHTML文字列を返す。
-    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) {
+    function renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString) {
       const { level1Groups, level2Groups } = buildGanttTimelineHeaderGroups(timelineDays, granularity);
+
+      const milestoneBandHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
+        .map(
+          (marker) =>
+            `<div class="gantt-milestone-band-marker" style="left:${marker.leftPx}px"><div class="gantt-milestone-band-diamond"></div><span class="gantt-milestone-band-label">${escapeHtmlText(marker.name)}</span></div>`
+        )
+        .join("");
 
       const level1Html = level1Groups
         .map(
@@ -3874,13 +4302,14 @@
       const level2Html = level2Groups
         .map((group) => {
           const firstDay = timelineDays[group.startIndex];
-          const weekendClass = granularity === "day" ? (firstDay.isSaturday ? " is-saturday" : firstDay.isSunday ? " is-sunday" : "") : "";
+          const dayTypeClassName = granularity === "day" ? calculateDayTypeBackgroundClassName(firstDay.dayType) : "";
+          const weekendClass = dayTypeClassName ? ` ${dayTypeClassName}` : "";
           return `<div class="gantt-day-column-header${weekendClass}" style="left:${group.startIndex * pixelsPerDay}px;width:${group.dayCount * pixelsPerDay}px">${escapeHtmlText(group.label)}</div>`;
         })
         .join("");
 
       const totalWidthPx = timelineDays.length * pixelsPerDay;
-      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px">${level1Html}${level2Html}</div>`;
+      return `<div class="gantt-timeline-header" style="width:${totalWidthPx}px"><div class="gantt-milestone-band">${milestoneBandHtml}</div>${level1Html}${level2Html}</div>`;
     }
 
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値。timelineDays は
@@ -3922,7 +4351,7 @@
           const firstDay = timelineDays[group.startIndex];
           let backgroundClass = "";
           if (granularity === "day") {
-            backgroundClass = firstDay.isSaturday ? "is-saturday" : firstDay.isSunday ? "is-sunday" : "";
+            backgroundClass = calculateDayTypeBackgroundClassName(firstDay.dayType);
           } else if (groupIndex % 2 === 1) {
             backgroundClass = "is-alt-period";
           }
@@ -3942,6 +4371,18 @@
         granularity === "day"
           ? `<div class="gantt-day-grid-lines" style="width:${totalWidthPx}px;background-size:${pixelsPerDay}px 100%"></div>`
           : "";
+      // 【前提】scheduleTreeRows はbuildScheduleTreeRowsの戻り値（全行がフラットに並ぶ）。
+      // 【処理】親行のバーラベルに使う「直接の子の営業日数合計」を求めるため、
+      //   parentId→直接の子スケジュール配列のMapを組み立てる（追加実装仕様書1.3節：
+      //   お手本1938行目と同様、直接の子のみを合計し孫以下は加算しない）。
+      const childSchedulesByParentId = new Map();
+      for (const { schedule } of scheduleTreeRows) {
+        if (schedule.parentId === null || schedule.parentId === undefined) continue;
+        if (!childSchedulesByParentId.has(schedule.parentId)) {
+          childSchedulesByParentId.set(schedule.parentId, []);
+        }
+        childSchedulesByParentId.get(schedule.parentId).push(schedule);
+      }
 
       const barsHtml = scheduleTreeRows
         .map(({ schedule, hasChildren }, rowIndex) => {
@@ -3955,7 +4396,18 @@
           const doneClass = schedule.taskStatus === "done" ? " is-done-status" : "";
           const parentClass = hasChildren ? " is-parent-bar" : "";
           const showLabel = hasChildren || geometry.widthPx > 60;
-          const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${geometry.durationDays}日)` : "";
+          // 【設計判断】親行のラベルだけは「直接の子の営業日数合計」を表示する
+          //   （追加実装仕様書1.3節：親自身の日数ではなく、子タスク合計日数を表示する箇所）。
+          //   葉（子なし）行のラベルはお手本と異なり従来通り暦日数のまま維持する
+          //   （本書に明記されていない箇所を変更しないため）。
+          const parentChildBusinessDayTotal = hasChildren
+            ? (childSchedulesByParentId.get(schedule.id) || []).reduce(
+                (total, childSchedule) => total + calculateBusinessDayCount(childSchedule.startDate, childSchedule.endDate),
+                0
+              )
+            : 0;
+          const labelDayCount = hasChildren ? parentChildBusinessDayTotal : geometry.durationDays;
+          const labelText = showLabel ? `${escapeHtmlText(schedule.name)} (${labelDayCount}日)` : "";
           const backgroundColor = schedule.color || "#2563EB";
           // 【設計判断】掴み手（bar-lh/bar-rh）は子を持たない行（葉ノード）にしか付与しない
           // （詳細設計書3.2.4：親行は移動のみ可能でリサイズ不可。親の日付は子から自動算出される
@@ -3963,17 +4415,22 @@
           const resizeHandlesHtml = hasChildren
             ? ""
             : `<div class="gantt-bar-handle bar-lh" data-drag-mode="resize-start"></div><div class="gantt-bar-handle bar-rh" data-drag-mode="resize"></div>`;
-          return `<div class="gantt-bar${parentClass}${doneClass}" data-schedule-id="${escapeHtmlText(schedule.id)}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}">${labelText}${resizeHandlesHtml}</div>`;
+          // 【前提】お手本ganttforge.html 1936行目と同じ書式（追加実装仕様書1.3節）。
+          // 【処理】営業日数・ステータス・メモ（あれば）をネイティブtitle属性用の文字列に組み立てる。
+          const scheduleBusinessDayCount = calculateBusinessDayCount(schedule.startDate, schedule.endDate);
+          const statusLabel = SCHEDULE_STATUS_LABELS[schedule.taskStatus] || schedule.taskStatus;
+          const notesSuffix = schedule.notes ? `\n\n${schedule.notes}` : "";
+          const barTitleText = `${schedule.name}\n${schedule.startDate} 〜 ${schedule.endDate}（${scheduleBusinessDayCount}営業日）\nステータス: ${statusLabel}${notesSuffix}`;
+          return `<div class="gantt-bar${parentClass}${doneClass}" data-schedule-id="${escapeHtmlText(schedule.id)}" style="left:${geometry.leftPx}px;top:${barTopPx}px;width:${geometry.widthPx}px;height:${barHeightPx}px;background:${backgroundColor}" title="${escapeHtmlText(barTitleText)}">${labelText}${resizeHandlesHtml}</div>`;
         })
         .join("");
 
       // 【前提】マイルストーン線・今日マーカーはどちらも「left位置だけ決めて、高さは
       //   CSSのtop:0;bottom:0に任せる」ため、ここでは高さ(height)を指定しない。
+      // 【設計判断】ひし形＋名前ラベルはrenderGanttTimelineHeaderToHtml側の専用帯
+      //   （.gantt-milestone-band）に描画するため、ここでは縦のガイド線のみを描画する。
       const milestoneMarkersHtml = calculateMilestoneMarkerPositions(milestones, timelineStartDateString, pixelsPerDay)
-        .map(
-          (marker) =>
-            `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px" data-tooltip="${escapeHtmlText(marker.name)}"><div class="gantt-milestone-diamond"></div></div>`
-        )
+        .map((marker) => `<div class="gantt-milestone-marker" style="left:${marker.leftPx}px"></div>`)
         .join("");
 
       const todayMarkerLeftPx = calculateTodayMarkerPosition(timelineDays, timelineStartDateString, pixelsPerDay, todayDateString);
@@ -3998,7 +4455,7 @@
     // 【結果】ganttPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderGanttChartToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString) {
       return (
-        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity) +
+        renderGanttTimelineHeaderToHtml(timelineDays, pixelsPerDay, granularity, milestones, timelineStartDateString) +
         renderGanttBodyToHtml(scheduleTreeRows, timelineDays, pixelsPerDay, milestones, timelineStartDateString, granularity, todayDateString)
       );
     }
@@ -4071,15 +4528,21 @@
 
     // 【前提】issueList は同一プロジェクト内のissue全件（折りたたみ状態に関係なく常に全件、
     //   x,y座標を持つ）。collapsedIssueIds は折りたたまれているissueidの集合。
+    //   pendingInlineEditIssueId は追加実装仕様書8.1節：タイトル未確定でインライン編集中の
+    //   issueid（無ければnull）。zoomLevel は追加実装仕様書8.3節：画面フィットのズーム倍率
+    //   （1が等倍）。
     // 【処理】filterVisibleIssuesで実際に表示する行を絞り込んでから、issue.x/yをそのまま
     //   絶対配置の左上原点として使い、ノード（丸みを帯びたラベル）と、親子を結ぶ線
     //   （buildMindmapEdgeList・calculateEdgeGeometry。辺も絞り込み後のissueListから
     //   計算するため、隠れた子ノードへの辺は自動的に描画されない）を組み立てる。
     //   各ノードにdata-issue-idを持たせ、ドラッグ配置・右クリックメニューの対象特定に使う。
     //   子を持つノードには「▸ 」を名前の前に付け、折りたたみ中はis-collapsed-nodeクラスで
-    //   見た目の目印を付ける。
+    //   見た目の目印を付ける。pendingInlineEditIssueIdに一致するノードだけは、名前の代わりに
+    //   タイトル入力用の<input>を描画する。
+    //   ズームは.mindmap-canvas-inner（内側の入れ物）にtransform:scaleで適用する。issue.x/yの
+    //   座標系はそのままに、見た目の拡大縮小だけを行うため、他の座標計算に影響しない。
     // 【結果】マインドマップキャンバスのHTML文字列を返す。
-    function renderMindmapCanvasToHtml(issueList, collapsedIssueIds) {
+    function renderMindmapCanvasToHtml(issueList, collapsedIssueIds, pendingInlineEditIssueId, zoomLevel) {
       const visibleIssues = filterVisibleIssues(issueList, collapsedIssueIds);
       if (visibleIssues.length === 0) {
         return '<p class="empty-state-message">マインドマップノードがありません。</p>';
@@ -4097,10 +4560,15 @@
           const isCollapsed = collapsedIssueIds.has(issue.id);
           const collapsedClass = isCollapsed ? " is-collapsed-node" : "";
           const collapsedIndicator = hasChildren && isCollapsed ? "▸ " : "";
-          return `<div class="mindmap-node${collapsedClass}" data-issue-id="${escapeHtmlText(issue.id)}" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${collapsedIndicator}${escapeHtmlText(issue.title)}</div>`;
+          const isPendingInlineEdit = issue.id === pendingInlineEditIssueId;
+          const editingClass = isPendingInlineEdit ? " is-inline-editing" : "";
+          const nodeInnerHtml = isPendingInlineEdit
+            ? `<input type="text" class="mindmap-inline-edit-input" data-issue-id="${escapeHtmlText(issue.id)}" value="${escapeHtmlText(issue.title)}">`
+            : `${collapsedIndicator}${escapeHtmlText(issue.title)}`;
+          return `<div class="mindmap-node${collapsedClass}${editingClass}" data-issue-id="${escapeHtmlText(issue.id)}" style="left:${issue.x}px;top:${issue.y}px;background:${backgroundColor}">${nodeInnerHtml}</div>`;
         })
         .join("");
-      return `<div class="mindmap-canvas">${edgesHtml}${nodesHtml}</div>`;
+      return `<div class="mindmap-canvas"><div class="mindmap-canvas-inner" style="transform:scale(${zoomLevel})">${edgesHtml}${nodesHtml}</div></div>`;
     }
 
     // ===== UI：DOM反映（薄い関数） =====
@@ -4422,9 +4890,9 @@
               <div class="panel-list-item-meta">${escapeHtmlText(snapshot.createdAt)}</div>
               ${compareResultHtml}
             </div>
-            <div class="panel-list-item-actions">
-              <button type="button" class="panel-add-button" data-action="restore-snapshot">この状態に復元</button>
-              <button type="button" class="panel-add-button" data-action="compare-snapshot">現在と比較</button>
+            <div class="panel-list-item-actions snapshot-item-icons">
+              <button type="button" class="wbs-icon-button" data-action="compare-snapshot" title="現在と比較">«</button>
+              <button type="button" class="wbs-icon-button" data-action="restore-snapshot" title="この状態に復元">⟲</button>
               <button type="button" class="wbs-icon-button" data-action="delete-snapshot" title="削除">🗑</button>
             </div>
           </div>`;
@@ -4436,17 +4904,26 @@
       document.getElementById("snapshotPanelBody").innerHTML = bodyHtml;
     }
 
+    // 【前提】count はプロジェクトに紐づくスナップショットの件数（未選択時はnull）。
+    // 【処理】見出し右側の件数表示（追加実装仕様書10章）を更新する。
+    // 【結果】#snapshotCountBadgeの表示テキストが最新の件数に切り替わる。
+    function updateSnapshotCountBadge(count) {
+      document.getElementById("snapshotCountBadge").textContent = count === null ? "" : `${count}件`;
+    }
+
     // 【前提】projectId はnull、または実在するプロジェクトのid。
     // 【処理】projectIdがnullなら空状態を表示し、そうでなければgetSnapshotsByProjectで
     //   取得して一覧を再描画する。
-    // 【結果】スナップショットパネルの表示が最新の状態に更新される。
+    // 【結果】スナップショットパネルの表示・件数表示が最新の状態に更新される。
     async function refreshSnapshotPanel(projectId) {
       if (!projectId) {
         applySnapshotPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
+        updateSnapshotCountBadge(null);
         return;
       }
       const snapshotList = await getSnapshotsByProject(projectId);
       applySnapshotPanel(renderSnapshotListToHtml(snapshotList, expandedSnapshotCompareIds, snapshotCompareResultsById));
+      updateSnapshotCountBadge(snapshotList.length);
     }
 
     // 【前提】currentSelectedProjectId・currentProjectObjectが設定済みであること。
@@ -4664,11 +5141,16 @@
     // ===== P4：メモパネル =====
     // 【設計判断】自動保存はデバウンス方式ではなく、入力欄からフォーカスが外れた時点
     //   （blur）で保存する簡略版にする。デバウンスタイマーの管理はコードの複雑さの割に
-    //   今回のスコープでの価値が低いと判断した。Markdownプレビューも今回は実装せず、
-    //   プレーンテキストのまま表示・編集する。
+    //   今回のスコープでの価値が低いと判断した。
+    //   Markdownプレビュー（編集／プレビュー／分割の3タブ）は追加実装仕様書9章で実装済み
+    //   （renderMemoMarkdownToSafeHtml・MEMO_EDITOR_TABS参照）。
 
     // 現在エディタで開いているメモのid。未選択時はnull。
     let currentSelectedMemoId = null;
+    // 現在の編集エリアの表示タブ（追加実装仕様書9.2節：MEMO_EDITOR_TABSのkeyのいずれか）。
+    // メモを切り替えてもタブ自体は保持する（お手本にあたる仕様が無いため、エディタの一般的な
+    // 挙動＝タブ切替はファイルをまたいで保持されるものとして扱う）。
+    let memoEditorActiveTab = "edit";
 
     // 【前提】memoList は同一プロジェクト内のメモ全件。selectedMemoId は現在編集中のメモid。
     // 【処理】タイトル・更新日時・削除ボタンを持つ一覧のHTML文字列を組み立てる。選択中の
@@ -4697,16 +5179,65 @@
         .join("");
     }
 
-    // 【前提】memo はnull（未選択）または選択中のメモオブジェクト。
-    // 【処理】タイトル入力欄・本文テキストエリアを持つ編集エリアのHTML文字列を組み立てる。
+    // 追加実装仕様書9.2節：メモ編集エリアの3タブ（基本設計書10章「編集／プレビュー／分割の
+    // 3タブ、Markdown対応」）。
+    const MEMO_EDITOR_TABS = [
+      { key: "edit", label: "編集" },
+      { key: "preview", label: "プレビュー" },
+      { key: "split", label: "分割" },
+    ];
+
+    // 【前提】markdownText はメモ本文（Markdownソース）。
+    // 【処理】marked.jsでHTMLに変換し、DOMPurifyでサニタイズする（追加実装仕様書9.1節：
+    //   採用理由＝本アプリのJSON出力・取込機能で、エクスポートしたメモを他者がインポート・
+    //   プレビューする経路が存在するため、変換後HTMLの<script>・onerror等を必ず除去してから
+    //   DOMに挿入する）。CDN読み込みに失敗している場合は、お手本のesc関数と同じ水準の
+    //   HTMLエスケープ済みプレーンテキストにフォールバックする（プレビューは自動描画のため、
+    //   PDF出力のような明示的なエラートーストは出さない）。
+    // 【結果】DOMにそのまま挿入できるサニタイズ済みHTML文字列を返す。
+    function renderMemoMarkdownToSafeHtml(markdownText) {
+      const isMarkdownLibraryAvailable = typeof window.marked !== "undefined" && typeof window.DOMPurify !== "undefined";
+      if (!isMarkdownLibraryAvailable) {
+        return escapeHtmlText(markdownText || "").replaceAll("\n", "<br>");
+      }
+      const rawHtml = window.marked.parse(markdownText || "");
+      return window.DOMPurify.sanitize(rawHtml);
+    }
+
+    // 【前提】memo はnull（未選択）または選択中のメモオブジェクト。activeTab は
+    //   MEMO_EDITOR_TABSのkeyのいずれか（"edit"|"preview"|"split"）。
+    // 【処理】タイトル入力欄・タブ切り替えボタン・タブに応じた本文表示（編集＝テキストエリアの
+    //   み、プレビュー＝サニタイズ済みHTMLのみ、分割＝左右に両方）を組み立てる。
     // 【結果】memoEditorBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
-    function renderMemoEditorToHtml(memo) {
+    function renderMemoEditorToHtml(memo, activeTab) {
       if (!memo) {
         return '<p class="empty-state-message">左の一覧からメモを選択するか、新規作成してください。</p>';
       }
+      const tabsHtml = MEMO_EDITOR_TABS
+        .map((tab) => {
+          const activeClass = tab.key === activeTab ? " is-active" : "";
+          return `<button type="button" class="toolbar-button${activeClass}" data-memo-tab="${tab.key}">${tab.label}</button>`;
+        })
+        .join("");
+      const editorTextareaHtml = `<textarea id="memoEditorBodyTextarea" placeholder="本文（Markdown）">${escapeHtmlText(memo.body)}</textarea>`;
+      const previewHtml = `<div class="memo-editor-preview">${renderMemoMarkdownToSafeHtml(memo.body)}</div>`;
+
+      let contentHtml;
+      if (activeTab === "preview") {
+        contentHtml = previewHtml;
+      } else if (activeTab === "split") {
+        contentHtml = `<div class="memo-editor-split">
+          <div class="memo-editor-split-pane">${editorTextareaHtml}</div>
+          <div class="memo-editor-split-pane">${previewHtml}</div>
+        </div>`;
+      } else {
+        contentHtml = editorTextareaHtml;
+      }
+
       return `
         <input type="text" id="memoEditorTitleInput" value="${escapeHtmlText(memo.title)}" placeholder="タイトル">
-        <textarea id="memoEditorBodyTextarea" placeholder="本文（Markdown）">${escapeHtmlText(memo.body)}</textarea>
+        <div class="memo-editor-tabs">${tabsHtml}</div>
+        ${contentHtml}
       `;
     }
 
@@ -4736,7 +5267,15 @@
       }
       applyMemoListPanel(renderMemoListToHtml(memoList, currentSelectedMemoId));
       const selectedMemo = memoList.find((memo) => memo.id === currentSelectedMemoId) || null;
-      applyMemoEditorPanel(renderMemoEditorToHtml(selectedMemo));
+      applyMemoEditorPanel(renderMemoEditorToHtml(selectedMemo, memoEditorActiveTab));
+    }
+
+    // 【前提】tabKey は MEMO_EDITOR_TABS のkeyのいずれか。
+    // 【処理】表示中のタブを切り替えて再描画する（追加実装仕様書9.2節）。
+    // 【結果】編集エリアの表示が切り替わる。
+    function handleMemoEditorTabButtonClick(tabKey) {
+      memoEditorActiveTab = tabKey;
+      refreshMemoPanel(currentSelectedProjectId);
     }
 
     async function handleCreateMemoButtonClick() {
@@ -4781,17 +5320,26 @@
 
     // 【前提】currentSelectedMemoIdが設定済み（エディタにメモが表示されている）であること。
     // 【処理】タイトル・本文入力欄からフォーカスが外れた時点で読み取り、addMemoで保存する。
-    // 【結果】保存後、一覧側の表示（タイトル・更新日時）を最新化する。
+    //   本文用の<textarea>は「プレビュー」タブでは描画されない（追加実装仕様書9.2節）ため、
+    //   その場合はDOMから読まず既存の本文をそのまま使う（要素が無くDOM参照が失敗するのを防ぐ）。
+    // 【結果】保存後、一覧側の表示（タイトル・更新日時）を最新化する。タイトル・本文の
+    //   <input>/<textarea>自体はここでは再生成しない（タイトル→本文とTabキーで移動している
+    //   最中にDOMを丸ごと差し替えると、フォーカス遷移が崩れるため）。プレビュー・分割タブの
+    //   プレビュー領域だけは、保存直後の本文を反映するようピンポイントで更新する。
     async function handleMemoEditorFieldBlur() {
       if (!currentSelectedMemoId) return;
       const memoList = await getMemosByProject(currentSelectedProjectId);
       const existingMemo = memoList.find((memo) => memo.id === currentSelectedMemoId);
       if (!existingMemo) return;
-      const title = document.getElementById("memoEditorTitleInput").value;
-      const body = document.getElementById("memoEditorBodyTextarea").value;
+      const titleInputElement = document.getElementById("memoEditorTitleInput");
+      const bodyTextareaElement = document.getElementById("memoEditorBodyTextarea");
+      const title = titleInputElement ? titleInputElement.value : existingMemo.title;
+      const body = bodyTextareaElement ? bodyTextareaElement.value : existingMemo.body;
       await addMemo({ ...existingMemo, title, body, updatedAt: new Date().toISOString() });
       const memoListAfterSave = await getMemosByProject(currentSelectedProjectId);
       applyMemoListPanel(renderMemoListToHtml(memoListAfterSave, currentSelectedMemoId));
+      const previewElement = document.querySelector(".memo-editor-preview");
+      if (previewElement) previewElement.innerHTML = renderMemoMarkdownToSafeHtml(body);
     }
 
     // ===== P5：コメント一覧パネル =====
@@ -5074,13 +5622,32 @@
     }
 
     // refreshGanttPanelと同じ考え方。対象はissues・マインドマップキャンバス。
+    // 【設計判断：ルートノード＝プロジェクト名（追加実装仕様書8.2節）】
+    //   issueが1件も無い場合、固定文字列ではなく現在のプロジェクト名をタイトルとするルート
+    //   ノードを自動生成する。プロジェクト情報が参照できない場合のみ「メインテーマ」に
+    //   フォールバックする（8.2節に明記の通り）。
     async function refreshMindmapPanel(projectId) {
       if (!projectId) {
         applyMindmapPanel('<p class="empty-state-message">プロジェクトを選択してください。</p>');
         return;
       }
-      const issueList = await getIssuesByProject(projectId);
-      applyMindmapPanel(renderMindmapCanvasToHtml(issueList, collapsedMindmapIssueIds));
+      let issueList = await getIssuesByProject(projectId);
+      if (issueList.length === 0) {
+        const rootIssue = {
+          id: generateId(),
+          projectId,
+          title: currentProjectObject?.name || "メインテーマ",
+          parentNodeId: null,
+          x: MINDMAP_LAYOUT_BASE_X,
+          y: MINDMAP_LAYOUT_BASE_Y,
+          color: MINDMAP_NODE_COLORS[0],
+          order: 0,
+        };
+        await addIssue(rootIssue);
+        issueList = [rootIssue];
+      }
+      applyMindmapPanel(renderMindmapCanvasToHtml(issueList, collapsedMindmapIssueIds, mindmapIssueIdPendingInlineEdit, mindmapZoomLevel));
+      attachMindmapInlineEditInputEvents();
     }
 
     // 【前提】projectId はnull、または実在するプロジェクトのid。
@@ -5098,6 +5665,10 @@
       }
       applyLockState(Boolean(currentProjectObject?.locked));
       applyReportButtonAvailability(Boolean(currentSelectedProjectId));
+      // プロジェクトが変われば見ているマインドマップも別物になるため、前のプロジェクトの
+      // ズーム倍率を引き継がない（追加実装仕様書8.3節：画面フィットのズーム状態はプロジェクト
+      // ごとにリセットする）。
+      mindmapZoomLevel = 1;
       await Promise.all([
         refreshGanttPanel(currentSelectedProjectId),
         refreshKanbanPanel(currentSelectedProjectId),
@@ -6490,29 +7061,116 @@
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
+    // ===== 追加実装仕様書8.1節：マインドマップのインライン編集 =====
+    // 【設計判断】お手本ganttforge.html mmAddChild/mmAddSibling/mmSaveEdit/mmEditKeyを踏襲する。
+    //   確認モーダル（prompt）は廃止し、「タイトル未確定（空文字）のノードを直接キャンバス上に
+    //   出現させ、その場でタイトルを入力させる」方式に統一する。本アプリはDBの状態から
+    //   毎回HTML文字列を再構築する設計のため、お手本のように既存DOM要素へ直接<input>を
+    //   差し込むのではなく、「どのissueがインライン編集中か」をmindmapIssueIdPendingInlineEdit
+    //   に持たせ、renderMindmapCanvasToHtmlにその状態を反映させる形で実現する。
+
+    // 【前提】parentIssueId は新規ノードの親issueのid（現在のプロジェクトの実在issueであること）。
+    // 【処理】タイトル未確定（空文字）の子ノードを作成し、自動レイアウトを再計算してから、
+    //   そのノードをインライン編集中としてマークして再描画する（追加実装仕様書8.1・8.3節）。
+    //   親が折りたたまれていた場合は展開する（新規ノードが隠れて見えなくなるのを防ぐため）。
+    // 【結果】キャンバス上に無題ノードが出現し、タイトル入力可能な状態になる。
+    async function createMindmapChildNodeWithInlineEdit(parentIssueId) {
+      if (!currentSelectedProjectId) return;
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const parentIssue = issueList.find((issue) => issue.id === parentIssueId);
+      if (!parentIssue) return;
+      const depthLevel = calculateIssueDepthLevel(parentIssueId, issueList) + 1;
+      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
+      const newIssue = {
+        id: generateId(),
+        projectId: currentSelectedProjectId,
+        title: "",
+        parentNodeId: parentIssueId,
+        x: parentIssue.x,
+        y: parentIssue.y,
+        color: MINDMAP_NODE_COLORS[colorIndex],
+        order: issueList.length * 10,
+      };
+      await addIssue(newIssue);
+      await applyMindmapAutoLayout(currentSelectedProjectId);
+      collapsedMindmapIssueIds.delete(parentIssueId);
+      mindmapIssueIdPendingInlineEdit = newIssue.id;
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】issueId は入力中のノードのid。inputElement は対応する<input>要素。
+    // 【処理】入力値を確定する。Escapeでキャンセルされていた場合、または空文字のままの場合は
+    //   ノード自体を削除する（お手本mmSaveEditと同じ「空のまま保存→新規ノードを削除」の挙動）。
+    //   それ以外は入力値をタイトルとして保存し、変更履歴に「追加」として記録する
+    //   （新規ノードの追加操作自体は、タイトルが確定した時点で完了とみなす）。
+    // 【結果】インライン編集状態を解除し、パネルを再描画する。
+    async function handleMindmapInlineEditInputBlur(issueId, inputElement) {
+      const wasCancelledByEscape = mindmapInlineEditCancelledByEscape;
+      mindmapInlineEditCancelledByEscape = false;
+      mindmapIssueIdPendingInlineEdit = null;
+
+      const trimmedTitle = inputElement.value.trim();
+      if (wasCancelledByEscape || !trimmedTitle) {
+        await deleteIssue(issueId);
+        await applyMindmapAutoLayout(currentSelectedProjectId);
+        await refreshMindmapPanel(currentSelectedProjectId);
+        return;
+      }
+
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const existingIssue = issueList.find((issue) => issue.id === issueId);
+      if (!existingIssue) return;
+      const issueToSave = { ...existingIssue, title: trimmedTitle };
+      await addIssue(issueToSave);
+      await recordChangelogEntry("add", issueToSave.projectId, "issues", "マインドマップノード", issueToSave.id, issueToSave.title, null, issueToSave, ISSUE_LOGGED_FIELD_LABELS);
+      await refreshMindmapPanel(currentSelectedProjectId);
+    }
+
+    // 【前提】event はインライン編集<input>のkeydownイベント。
+    // 【処理】Enterで確定（blurさせて保存処理に委ねる）、Escapeで破棄（キャンセルフラグを
+    //   立ててからblurさせる）。お手本mmEditKeyと同じ挙動。
+    // 【結果】inputからフォーカスが外れ、handleMindmapInlineEditInputBlurが呼ばれる。
+    function handleMindmapInlineEditInputKeydown(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.target.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        mindmapInlineEditCancelledByEscape = true;
+        event.target.blur();
+      }
+    }
+
+    // 【前提】renderMindmapCanvasToHtmlの結果がすでにDOMへ反映済みであること。
+    // 【処理】mindmapIssueIdPendingInlineEdit相当の<input>要素が存在すれば、フォーカス・
+    //   全選択し、keydown/blurのイベントを結びつける（innerHTML差し替えのたびにイベント
+    //   リスナーは失われるため、描画後は必ずこの関数を呼び直す必要がある）。
+    // 【結果】インライン編集中の<input>が操作可能になる。
+    function attachMindmapInlineEditInputEvents() {
+      const inputElement = document.querySelector(".mindmap-inline-edit-input");
+      if (!inputElement) return;
+      const issueId = inputElement.dataset.issueId;
+      inputElement.addEventListener("keydown", handleMindmapInlineEditInputKeydown);
+      inputElement.addEventListener("blur", () => handleMindmapInlineEditInputBlur(issueId, inputElement));
+      inputElement.focus();
+      inputElement.select();
+    }
+
+    // 【前提】currentSelectedProjectIdが設定済みであること。refreshMindmapPanel（8.2節）に
+    //   より、ルートノード（プロジェクト名）は必ず1件存在する前提。
+    // 【処理】ルートノードの子として、インライン編集中の無題ノードを作成する
+    //   （追加実装仕様書8.1節：トップの「＋ノード追加」ボタンも、お手本と同じ追加操作として
+    //   インライン編集方式に統一する）。
+    // 【結果】createMindmapChildNodeWithInlineEditと同じ。
     async function handleAddIssueButtonClick() {
       if (!currentSelectedProjectId) {
         window.alert("先にプロジェクトを選択してください。");
         return;
       }
-      const issueTitle = window.prompt("ノードのタイトルを入力してください");
-      if (!issueTitle) return;
-      // 新規ノードが重ならないよう、ある程度ばらけた座標に配置する
-      // （初期配置のみランダム。配置後はドラッグで自由に動かせる＝下記の一連のハンドラ）。
-      const randomX = Math.round(80 + Math.random() * 320);
-      const randomY = Math.round(60 + Math.random() * 300);
-      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
-      await addIssue({
-        id: generateId(),
-        projectId: currentSelectedProjectId,
-        title: issueTitle,
-        parentNodeId: null,
-        x: randomX,
-        y: randomY,
-        color: MINDMAP_NODE_COLORS[colorIndex],
-        order: 0,
-      });
-      await refreshMindmapPanel(currentSelectedProjectId);
+      const issueList = await getIssuesByProject(currentSelectedProjectId);
+      const rootIssue = issueList.find((issue) => issue.parentNodeId === null || issue.parentNodeId === undefined);
+      if (!rootIssue) return;
+      await createMindmapChildNodeWithInlineEdit(rootIssue.id);
     }
 
     // ===== マインドマップ：ノードのドラッグ配置 =====
@@ -6637,56 +7295,26 @@
     }
 
     // 【前提】parentIssueId は子ノードを追加したい親ノードのid。
-    // 【処理】parentNodeIdをparentIssueIdに固定した新規ノードを、親の近くの座標に作成する
-    //   （モーダル・ダイアログ一覧P7：右クリックメニュー「子ノード追加」に対応）。
-    // 【結果】保存後、変更履歴を記録し、パネルを再描画する。
+    // 【処理】createMindmapChildNodeWithInlineEditへ委譲する（モーダル・ダイアログ一覧P7：
+    //   右クリックメニュー「子ノード追加」に対応。追加実装仕様書8.1節：インライン編集方式）。
+    // 【結果】createMindmapChildNodeWithInlineEditと同じ。
     async function handleAddChildIssueButtonClick(parentIssueId) {
-      const issueList = await getIssuesByProject(currentSelectedProjectId);
-      const parentIssue = issueList.find((issue) => issue.id === parentIssueId);
-      if (!parentIssue) return;
-      const childTitle = window.prompt("子ノードのタイトルを入力してください");
-      if (!childTitle) return;
-      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
-      const issueToSave = {
-        id: generateId(),
-        projectId: currentSelectedProjectId,
-        title: childTitle,
-        parentNodeId: parentIssueId,
-        x: parentIssue.x + 120,
-        y: parentIssue.y + 60,
-        color: MINDMAP_NODE_COLORS[colorIndex],
-        order: 0,
-      };
-      await addIssue(issueToSave);
-      await recordChangelogEntry("add", issueToSave.projectId, "issues", "マインドマップノード", issueToSave.id, issueToSave.title, null, issueToSave, ISSUE_LOGGED_FIELD_LABELS);
-      await refreshMindmapPanel(currentSelectedProjectId);
+      await createMindmapChildNodeWithInlineEdit(parentIssueId);
     }
 
     // 【前提】siblingIssueId は兄弟ノードを追加したい基準ノードのid。
-    // 【処理】siblingIssueIdと同じparentNodeIdを持つ新規ノードを、基準ノードの近くの座標に
-    //   作成する（モーダル・ダイアログ一覧P7：右クリックメニュー「兄弟ノード追加」に対応）。
-    //   基準ノードがルート（parentNodeId:null）の場合は、新規ノードもルートとして作る。
-    // 【結果】保存後、変更履歴を記録し、パネルを再描画する。
+    // 【処理】siblingIssueIdと同じparentNodeIdを持つ位置に、createMindmapChildNodeWithInlineEdit
+    //   経由でインライン編集中の新規ノードを作成する（モーダル・ダイアログ一覧P7：右クリック
+    //   メニュー「兄弟ノード追加」に対応。追加実装仕様書8.1節）。基準ノードがルート
+    //   （parentNodeId:null）の場合は何もしない（お手本mmAddSiblingと同じ制約。ルートは
+    //   8.2節により常に1件の前提を保つ）。
+    // 【結果】createMindmapChildNodeWithInlineEditと同じ。
     async function handleAddSiblingIssueButtonClick(siblingIssueId) {
       const issueList = await getIssuesByProject(currentSelectedProjectId);
       const siblingIssue = issueList.find((issue) => issue.id === siblingIssueId);
       if (!siblingIssue) return;
-      const newTitle = window.prompt("兄弟ノードのタイトルを入力してください");
-      if (!newTitle) return;
-      const colorIndex = Math.floor(Math.random() * MINDMAP_NODE_COLORS.length);
-      const issueToSave = {
-        id: generateId(),
-        projectId: currentSelectedProjectId,
-        title: newTitle,
-        parentNodeId: siblingIssue.parentNodeId,
-        x: siblingIssue.x,
-        y: siblingIssue.y + 80,
-        color: MINDMAP_NODE_COLORS[colorIndex],
-        order: 0,
-      };
-      await addIssue(issueToSave);
-      await recordChangelogEntry("add", issueToSave.projectId, "issues", "マインドマップノード", issueToSave.id, issueToSave.title, null, issueToSave, ISSUE_LOGGED_FIELD_LABELS);
-      await refreshMindmapPanel(currentSelectedProjectId);
+      if (siblingIssue.parentNodeId === null || siblingIssue.parentNodeId === undefined) return;
+      await createMindmapChildNodeWithInlineEdit(siblingIssue.parentNodeId);
     }
 
     // 【前提】action は右クリックメニューのdata-action値（"rename"|"add-child"|"add-sibling"|
@@ -6715,7 +7343,8 @@
     // 【処理】削除対象件数（起点＋子孫）をcollectIssueSubtreeIdsで数え、詳細設計書3.5.3節の
     //   仕様どおり3件を超える場合のみconfirm()で確認する（3件以下は誤操作しても
     //   取り返しがつく範囲とみなし、即削除する）。
-    // 【結果】確認OK、または3件以下ならdeleteIssueCascadeで削除しパネルを再描画する。
+    // 【結果】確認OK、または3件以下ならdeleteIssueCascadeで削除し、自動レイアウトを
+    //   再計算してから（追加実装仕様書8.3節：削除のたびに再計算）パネルを再描画する。
     //   キャンセル時は何もしない。
     async function handleDeleteIssueButtonClick(issueId) {
       const issueList = await getIssuesByProject(currentSelectedProjectId);
@@ -6726,6 +7355,7 @@
         if (!window.confirm(confirmMessage)) return;
       }
       await deleteIssueCascade(issueId, currentSelectedProjectId);
+      await applyMindmapAutoLayout(currentSelectedProjectId);
       await refreshMindmapPanel(currentSelectedProjectId);
     }
 
@@ -6937,9 +7567,14 @@
       document.getElementById("deleteProjectButton").addEventListener("click", handleDeleteProjectButtonClick);
       document.getElementById("addScheduleButton").addEventListener("click", handleAddScheduleButtonClick);
       document.getElementById("addIssueButton").addEventListener("click", handleAddIssueButtonClick);
+      document.getElementById("mindmapFitViewButton").addEventListener("click", handleMindmapFitViewButtonClick);
       // マインドマップのノードドラッグ。pointerdownは各ノードへのイベント委譲、
       // pointermove/pointerupはドラッグ中にポインタがノード外へ出ても追従できるようdocument側で拾う。
       document.getElementById("mindmapPanelBody").addEventListener("pointerdown", (event) => {
+        // 追加実装仕様書8.1節：インライン編集中の<input>内でのクリックは、ドラッグ開始とは
+        // 別物として扱う（ここでreturnしないと、入力欄をクリックした瞬間にドラッグが始まり
+        // フォーカス・テキスト選択ができなくなる）。
+        if (event.target.closest(".mindmap-inline-edit-input")) return;
         const node = event.target.closest(".mindmap-node");
         if (!node) return;
         handleMindmapNodePointerDown(event, node.dataset.issueId, node);
@@ -7215,6 +7850,12 @@
         },
         true
       );
+      // 追加実装仕様書9.2節：編集／プレビュー／分割タブの切り替え。
+      document.getElementById("memoEditorBody").addEventListener("click", (event) => {
+        const tabButton = event.target.closest("[data-memo-tab]");
+        if (!tabButton) return;
+        handleMemoEditorTabButtonClick(tabButton.dataset.memoTab);
+      });
 
       // P5：コメントの投稿・削除・グループ開閉（イベント委譲。パネルは再描画のたびに
       //   作り直されるため）。
