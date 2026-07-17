@@ -5574,7 +5574,7 @@
         .map((entry) => {
           const actionLabel = actionLabels[entry.action] || entry.action;
           const restoreButtonHtml = entry.action === "delete"
-            ? `<button type="button" class="panel-add-button" data-action="restore-log">戻す</button>`
+            ? `<button type="button" class="panel-add-button" data-action="restore-log" title="この状態に戻す">戻す</button>`
             : "";
           return `<div class="panel-list-item" data-entry-id="${escapeHtmlText(entry.id)}">
             <div class="panel-list-item-main">
