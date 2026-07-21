@@ -2635,6 +2635,8 @@
     async function recordChangelogEntry(action, projectId, store, storeLabel, itemId, itemName, beforeItem, afterItem, fieldLabelsByKey) {
       const changes = action === "edit" ? diffFields(beforeItem, afterItem, fieldLabelsByKey) : [];
       if (action === "edit" && changes.length === 0) return false;
+      const snapshot = action === "edit" ? beforeItem : afterItem;
+
       await addChangelogEntry({
         id: generateId(),
         projectId,
@@ -2644,7 +2646,7 @@
         itemId,
         itemName,
         changes,
-        snapshot: afterItem,
+        snapshot,
         createdAt: new Date().toISOString(),
       });
       return true;
@@ -5686,7 +5688,7 @@
     //   "all" | "add" | "edit" | "delete"。
     // 【処理】filterが"all"以外ならactionで絞り込み、記録日時の降順（新しい順）に並べて、
     //   操作種別バッジ・対象名・記録日時のHTML文字列を組み立てる。削除ログのみ「戻す」
-    //   ボタンを添える（基本設計書8.1節：削除ログのみ戻すボタンあり）。「変更」ログは
+    //   ボタンを添える（削除ログ,編集ログ2つが戻すボタンあり）。
     //   renderChangelogChangesToHtmlでフィールドごとの新旧値も表示する（UI差分表No.69）。
     // 【結果】changelogPanelBodyのinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderChangelogEntriesToHtml(changelogEntries, filter) {
@@ -5701,13 +5703,17 @@
       return filteredEntries
         .map((entry) => {
           const actionLabel = actionLabels[entry.action] || entry.action;
-          const restoreButtonHtml = entry.action === "delete"
-            ? `<button type="button" class="panel-add-button" data-action="restore-log" title="この状態に戻す">戻す</button>`
+          const restoreButtonHtml = (entry.action === "delete" || entry.action === "edit") && !entry.restoredAt
+          ? `<button type="button" class="panel-add-button" data-action="restore-log" title="この状態に戻す">戻す</button>`
+          : "";
+          const restoredLabelHtml = entry.restoredAt
+            ? `<span class="changelog-restored-label" title="${escapeHtmlText(entry.restoredAt)}">復元済み</span>`
             : "";
           return `<div class="panel-list-item" data-entry-id="${escapeHtmlText(entry.id)}">
             <div class="panel-list-item-main">
               <span class="changelog-action-badge is-${escapeHtmlText(entry.action)}">${escapeHtmlText(actionLabel)}</span>
               ${escapeHtmlText(entry.storeLabel)}「${escapeHtmlText(entry.itemName)}」
+              ${restoredLabelHtml}
               <div class="panel-list-item-meta">${escapeHtmlText(entry.createdAt)}</div>
               ${renderChangelogChangesToHtml(entry.changes)}
             </div>
@@ -5778,6 +5784,16 @@
       applyChangelogPanel(renderChangelogEntriesToHtml(currentChangelogEntries, currentChangelogFilter));
     }
 
+    // 【前提】store は "projects" | "schedules" | "tasks" | "issues"。snapshotはentry.snapshot
+    //   （復元に使ったオブジェクト本体）。
+    // 【処理】名前を表すフィールド名がストアによって異なる（データモデル設計3章：
+    //   projects/schedulesは"name"、tasks/issuesは"title"）ため、ここで吸収する。
+    // 【結果】表示用の名称文字列を返す。
+    function getSnapshotDisplayName(store, snapshot) {
+      if (store === "tasks" || store === "issues") return snapshot.title;
+      return snapshot.name;
+    }
+
     // 【前提】entryId は「戻す」を押された変更履歴エントリのid（currentChangelogEntriesに
     //   含まれること。削除ログのみボタンが表示されるため、通常はaction==="delete"）。
     // 【処理】確認の上、entry.snapshot（削除直前の全フィールドのコピー）をentry.storeに
@@ -5810,7 +5826,11 @@
         await addIssue(entry.snapshot);
         await refreshMindmapPanel(currentSelectedProjectId);
       }
-      showToast(`「${entry.itemName}」を復元しました`);
+        // 復元済みであることを記録する（ボタンは消さず、何度でも再度戻せる状態を保つ）。
+      entry.restoredAt = new Date().toISOString();
+      await addChangelogEntry(entry);
+      const restoredName = getSnapshotDisplayName(entry.store, entry.snapshot);
+      showToast(`「${restoredName}」を復元しました`);
       await refreshChangelogPanel(currentSelectedProjectId);
     }
 
