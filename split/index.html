@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GanttForge再現アプリ</title>
+  <!-- UIデザイン仕様書1.4節「フォントファミリー：'DM Sans'（Google Fonts等からの読み込みを想定）」に
+       基づきCDN経由で読み込む。ネットワーク遮断環境では読込に失敗するが、その場合はフォールバックの
+       システムフォントで表示される（フォント読込の成否がアプリの動作自体には影響しない）。 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- 詳細設計書1.2節「使用ライブラリ（CDN経由・元アプリと同一を踏襲）」の指定バージョンで読み込む。
+       PDF出力（html2canvas/jsPDF）・Excel出力（xlsx-js-style）はこの3本のグローバルオブジェクトに
+       依存する。<head>内で（defer等を付けず）同期的に読み込むことで、DOMContentLoaded時点では
+       必ず読み込みが完了しているか失敗しているかが確定した状態になる
+       （PDF出力側のライブラリ未読込チェックが、読込中の一瞬を誤って「失敗」と判定しないようにするため）。 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <!-- 追加実装仕様書9.1節：メモのMarkdown対応（松＝CDNライブラリ＋サニタイズ方式）。
+       marked.js（Markdown→HTML変換）とDOMPurify（変換後HTMLのサニタイズ）を読み込む。
+       本アプリにはJSON出力・取込機能があり、エクスポートしたメモを他者がインポート・
+       プレビューする経路が存在するため、XSS対策として両方を組み合わせて使う。 -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header-primary">
+    <div class="header-group">
+      <span class="app-logo">GanttForge</span>
+      <label for="projectSelectDropdown">プロジェクト：</label>
+      <select id="projectSelectDropdown"></select>
+      <button id="createProjectButton" type="button">＋ 新規プロジェクト</button>
+      <button id="deleteProjectButton" class="toolbar-button" type="button">🗑 プロジェクト削除</button>
+    </div>
+    <div class="header-group">
+      <!-- 第1ヘッダー右側の並び順修正：Excel出力／PDF出力／データ出力／データ取込の順にする
+           （ユーザー指摘により、以前は逆順になっていた）。 -->
+      <!-- PDF出力・Excel出力はプロジェクト未選択時は使用不可（基本設計書2.1）。
+           初期のdisabled属性は、プロジェクトが1件も無い場合の初期表示用。実際の有効/無効は
+           switchToProject内のapplyReportButtonAvailabilityが選択状態に応じて切り替える。 -->
+      <button id="exportExcelButton" class="toolbar-button" type="button" disabled>Excel出力</button>
+      <button id="exportPdfButton" class="toolbar-button" type="button" disabled>PDF出力</button>
+      <button id="exportDataButton" class="toolbar-button" type="button">データ出力</button>
+      <button id="importDataButton" class="toolbar-button" type="button">データ取込</button>
+      <!-- 取込ファイル選択用の非表示input。importDataButtonのクリックでこちらをクリックさせる
+           （<input type="file">自体をボタンとして見せると装飾の自由度が下がるため）。 -->
+      <input id="importFileInput" type="file" accept="application/json" hidden>
+    </div>
+  </header>
+
+  <header class="app-header-secondary">
+    <div class="header-group">
+      <button id="lockToggleButton" class="toolbar-button" type="button">🔒 ロック</button>
+      <button id="addScheduleButton" class="toolbar-button" type="button">＋ スケジュール追加</button>
+      <!-- 表示粒度（日/週/1ヶ月/3ヶ月）は1つの塊として、折り返さずセットのままスクロールさせる。 -->
+      <div class="button-group">
+        <button class="toolbar-button is-active" type="button" data-granularity="day">日</button>
+        <button class="toolbar-button" type="button" data-granularity="week">週</button>
+        <button class="toolbar-button" type="button" data-granularity="month">1ヶ月</button>
+        <button class="toolbar-button" type="button" data-granularity="quarter">3ヶ月</button>
+      </div>
+      <button id="todayButton" class="toolbar-button" type="button">今日</button>
+      <!-- 初期表示は仮の文言。実際のラベルはrerenderWbsAndGanttFromCacheが、親行の実際の
+           開閉状態（areAllParentRowsCollapsed）を毎回判定して都度上書きする（対応表No.39）。 -->
+      <button id="toggleAllScheduleRowsButton" class="toolbar-button" type="button">全て閉じる</button>
+      <!-- 列トグル（開始/終了/状態）も同様に1つの塊としてまとめる。 -->
+      <div class="button-group">
+        <button id="toggleColumnStartDateButton" class="toolbar-button" type="button">開始</button>
+        <button id="toggleColumnEndDateButton" class="toolbar-button" type="button">終了</button>
+        <button id="toggleColumnStatusButton" class="toolbar-button" type="button">状態</button>
+      </div>
+      <button id="milestoneButton" class="toolbar-button" type="button">マイルストーン</button>
+      <button id="editProjectButton" class="toolbar-button" type="button">編集</button>
+    </div>
+    <div class="header-group">
+      <!-- 第2ヘッダー右側の並び順修正：タスク管理／マインドマップ／変更履歴／コメント／メモ／
+           即時メモ／スナップショットの順にする（ユーザー指摘により、以前は逆順になっていた）。 -->
+      <button id="switchToKanbanButton" class="toolbar-button" type="button">タスク管理</button>
+      <button id="switchToMindmapButton" class="toolbar-button" type="button">マインドマップ</button>
+      <button id="changelogButton" class="toolbar-button" type="button">変更履歴</button>
+      <button id="commentButton" class="toolbar-button" type="button">コメント</button>
+      <button id="memoButton" class="toolbar-button" type="button">メモ</button>
+      <button id="quickMemoButton" class="toolbar-button" type="button">即時メモ</button>
+      <button id="snapshotButton" class="toolbar-button" type="button">スナップショット</button>
+    </div>
+  </header>
+
+  <div id="lockBand" hidden>🔒 ロック中 — 編集操作は無効です</div>
+
+  <main>
+    <section id="ganttPanel">
+      <div class="main-workspace">
+        <div id="wbsPanel" class="wbs-panel"></div>
+        <div class="gantt-scroll-area">
+          <div id="ganttPanelBody"></div>
+        </div>
+      </div>
+      <!-- 追加実装仕様書2.1節：プロジェクト未選択時の空状態画面。ガント本体エリア
+           （WBSパネル＋タイムライン部分）全体をこの表示に置き換える。ヘッダー2段は
+           通常通り表示したままでよいため、この画面はsection内・main-workspaceの外に置く。 -->
+      <div id="ganttEmptyState" class="gantt-empty-state" hidden>
+        <div class="gantt-empty-state-icon">☰</div>
+        <h2 class="gantt-empty-state-title">プロジェクトがありません</h2>
+        <p class="gantt-empty-state-description">新規プロジェクトを作成してガントチャートを始めましょう</p>
+        <button type="button" id="createFirstProjectButton" class="panel-add-button">＋最初のプロジェクトを作成</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- モーダル・ダイアログ一覧②：右側スライドパネル（P1タスク管理）。ガント画面の上に
+       スライドインし、背後（ガント画面）は隠さない。P2〜P7は同じ構造を流用する想定。 -->
+  <aside id="kanbanSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>タスク管理</h2>
+      <button type="button" id="closeKanbanPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div id="kanbanPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P2：スナップショット一覧。保存・一覧・削除・復元・比較。追加実装仕様書10章：
+       保存ボタンは見出し内に一本化し、復元・比較は行ホバー時のアイコンに一本化する。 -->
+  <aside id="snapshotSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <div class="slide-panel-header-title-group">
+        <h2>スナップショット</h2>
+        <span id="snapshotCountBadge" class="panel-count-badge"></span>
+      </div>
+      <div class="slide-panel-header-actions">
+        <button id="saveSnapshotButton" class="toolbar-button" type="button">保存</button>
+        <button type="button" id="closeSnapshotPanelButton" class="slide-panel-close-button">×</button>
+      </div>
+    </div>
+    <div class="slide-panel-body">
+      <div id="snapshotPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P3：即時メモ。個別削除は確認なし即削除（既知の仕様）。全削除は確認ダイアログを挟む
+       （基本設計書10章・詳細設計書3.8.2）。 -->
+  <aside id="quickMemoSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <div class="slide-panel-header-title-group">
+        <h2>即時メモ</h2>
+        <button type="button" class="toolbar-button" id="clearQuickMemosButton">全削除</button>
+      </div>
+      <button type="button" id="closeQuickMemoPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div id="quickMemoPanelBody"></div>
+      <div class="quick-memo-input-area">
+        <textarea id="quickMemoTextInput" rows="2" placeholder="即時メモを入力（Ctrl+Enterで投稿）"></textarea>
+        <button id="postQuickMemoButton" class="panel-add-button" type="button">投稿</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- P4：メモ。左に一覧、右に編集エリア（プレーンテキスト。Markdown変換は別工程）。 -->
+  <aside id="memoSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>メモ</h2>
+      <button type="button" id="closeMemoPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body memo-panel-body">
+      <div class="memo-list-column">
+        <button id="createMemoButton" class="panel-add-button" type="button">＋ 新規メモ</button>
+        <div id="memoListBody"></div>
+      </div>
+      <div class="memo-editor-column" id="memoEditorBody"></div>
+    </div>
+  </aside>
+
+  <!-- P5：コメント一覧。プロジェクト内の全スケジュールに紐づくコメントをスケジュール単位で表示。
+       追加実装仕様書7章：件数表示（見出し右の「N件」、本文上のスケジュール別内訳）を追加。 -->
+  <aside id="commentSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <div class="slide-panel-header-title-group">
+        <h2>コメント</h2>
+        <span id="commentCountBadge" class="panel-count-badge"></span>
+      </div>
+      <button type="button" id="closeCommentPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div id="commentPanelSummary" class="comment-panel-summary"></div>
+    <div class="slide-panel-body">
+      <div id="commentPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P6：変更履歴。一覧＋フィルタタブ（すべて/追加/変更/削除）。「戻す」は別工程。 -->
+  <aside id="changelogSlidePanel" class="slide-panel">
+    <div class="slide-panel-header">
+      <h2>変更履歴</h2>
+      <button type="button" id="closeChangelogPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <div class="changelog-filter-tabs" id="changelogFilterTabs">
+        <button type="button" class="toolbar-button is-active" data-changelog-filter="all">すべて</button>
+        <button type="button" class="toolbar-button" data-changelog-filter="add">追加</button>
+        <button type="button" class="toolbar-button" data-changelog-filter="edit">変更</button>
+        <button type="button" class="toolbar-button" data-changelog-filter="delete">削除</button>
+        <button type="button" class="toolbar-button" id="clearChangelogButton">全削除</button>
+      </div>
+      <div id="changelogSummary" class="changelog-summary"></div>
+      <div id="changelogPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- P7：マインドマップ。ノードのドラッグ配置・右クリックメニュー（名前変更/子追加/兄弟追加/
+       折りたたみ/削除）に対応。他パネルより横幅が必要なため広めにする（CSSで個別指定）。 -->
+  <aside id="mindmapSlidePanel" class="slide-panel mindmap-slide-panel">
+    <div class="slide-panel-header">
+      <h2>マインドマップ</h2>
+      <button type="button" id="closeMindmapPanelButton" class="slide-panel-close-button">×</button>
+    </div>
+    <div class="slide-panel-body">
+      <button id="addIssueButton" class="panel-add-button" type="button">＋ ノード追加</button>
+      <button id="mindmapFitViewButton" class="toolbar-button" type="button">画面フィット</button>
+      <div id="mindmapPanelBody"></div>
+    </div>
+  </aside>
+
+  <!-- マインドマップの右クリックメニュー。位置はJSで動的にtop/leftを指定する。 -->
+  <div id="mindmapContextMenu" class="mindmap-context-menu" hidden>
+    <button type="button" data-action="rename">名前を変更 (F2)</button>
+    <button type="button" data-action="add-child">子ノード追加 (Tab)</button>
+    <button type="button" data-action="add-sibling">兄弟ノード追加 (Enter)</button>
+    <button type="button" data-action="toggle-collapse">折りたたみ (Space)</button>
+    <button type="button" data-action="delete">削除 (Del)</button>
+  </div>
+
+  <!-- モーダル・ダイアログ一覧①：中央モーダルの共通の入れ物。中身はopenModal()で差し替える。 -->
+  <div id="modalOverlay" class="modal-overlay" hidden>
+    <div class="modal-panel" id="modalPanel"></div>
+  </div>
+
+  <!-- 共通UI部品：トースト通知（UIデザイン仕様書2.4節）。showToast()がtextContentとshowクラスを
+       差し替えるだけの単一の入れ物で、全機能から共通で使い回す。 -->
+  <div id="toast"></div>
+
+  <!-- UI差分表No.75／対応表No.17：ガントバー直接クリックの軽量ポップアップ。openScheduleModalの
+       中央モーダルとは別物で、クリックしたバーの近くに表示する共通の入れ物。 -->
+  <div id="taskPopup" class="task-popup" hidden></div>
+
+  <script src="js/01-db-schema.js"></script>
+  <script src="js/02-db-crud.js"></script>
+  <script src="js/03-data-io.js"></script>
+  <script src="js/04-gantt-core.js"></script>
+  <script src="js/05-excel-export.js"></script>
+  <script src="js/06-mindmap-layout.js"></script>
+  <script src="js/07-ui-render-dispatch.js"></script>
+  <script src="js/08-panel-snapshot.js"></script>
+  <script src="js/09-panel-quickmemo.js"></script>
+  <script src="js/10-panel-memo.js"></script>
+  <script src="js/11-panel-comments.js"></script>
+  <script src="js/12-panel-changelog.js"></script>
+  <script src="js/13-ui-common.js"></script>
+  <script src="js/14-modal-project-schedule.js"></script>
+  <script src="js/15-gantt-interactions.js"></script>
+  <script src="js/16-ui-misc-handlers.js"></script>
+  <script src="js/17-mindmap-interactions.js"></script>
+  <script src="js/18-scroll-sync.js"></script>
+  <script src="js/19-app-init.js"></script>
+</body>
+</html>
