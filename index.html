@@ -318,20 +318,33 @@
       font-size: 12px;
     }
 
-    /* 見出し行の直下・スケジュール一覧の直前に置く、プロジェクト全体の進捗バー。
-       #taskPopup側の.task-popup-progress-*（1件のスケジュール用）とは対象が異なるため、
-       クラス名をwbs-project-progress-*として明確に分ける。 */
-    .wbs-project-progress-row {
-      padding: 8px 8px 10px;
-      border-bottom: 1.5px solid var(--color-border);
+    /* プロジェクト全体の進捗バー。.wbs-header-row上部の空き帯（var(--milestone-band-height)分。
+       ガント側の.gantt-milestone-bandに相当する領域だが、WBS側では元々未使用だった）に
+       重ねて表示する。新しい行として追加すると見出し全体の高さが伸び、ガント側
+       （.gantt-timeline-header）との高さが左右で揃わなくなり、#wbsPanelと.gantt-scroll-area
+       は別スクロールコンテナでscrollTopを数値同期しているだけのため、スケジュール行とガント
+       バーの縦位置がずれてしまう。既存の空き帯に重ねれば見出しの高さは一切変わらないため、
+       このズレが起こらない。#taskPopup側の.task-popup-progress-*（1件のスケジュール用）とは
+       対象が異なるため、クラス名をwbs-project-progress-*として明確に分ける。 */
+    .wbs-project-progress-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--milestone-band-height);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid var(--color-border);
     }
 
     .wbs-project-progress-track {
-      height: 6px;
+      width: 80px;
+      flex: 0 0 auto;
+      height: 5px;
       background: var(--color-surface-3);
       border-radius: 3px;
       overflow: hidden;
-      margin-bottom: 4px;
     }
 
     .wbs-project-progress-fill {
@@ -340,8 +353,10 @@
     }
 
     .wbs-project-progress-label {
-      font-size: 11px;
+      font-size: 10px;
+      font-weight: 400;
       color: var(--color-text-light);
+      white-space: nowrap;
     }
 
     .wbs-row {
@@ -4312,9 +4327,10 @@
     //   操作できるようにする）。それ以外（ドラッグハンドル・操作アイコン群）はモーダル・
     //   ダイアログ一覧「1.」の指示どおりホバー時のみうっすら表示する。
     //
-    //   見出し行とスケジュール一覧の間には、calculateProjectProgressPercentで算出した
-    //   プロジェクト全体の進捗バーを1本挟む（スケジュール単位の進捗は#taskPopup側の役割のため、
-    //   ここでは個々の行ではなくプロジェクト全体の1本だけを表示する）。
+    //   見出し行の上部には、calculateProjectProgressPercentで算出したプロジェクト全体の
+    //   進捗バーを、既存の空き帯（CSS側.wbs-project-progress-overlay参照）に重ねて表示する
+    //   （スケジュール単位の進捗は#taskPopup側の役割のため、ここでは個々の行ではなく
+    //   プロジェクト全体の1本だけを表示する）。
     // 【結果】wbsPanel要素のinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns, collapsedScheduleIds) {
       const headerExtraColumnsHtml = [
@@ -4323,20 +4339,15 @@
         visibleColumns.status ? '<div class="wbs-column-extra">状態</div>' : "",
       ].join("");
 
-      // 見出しブロックは「上：プロジェクト全体の進捗バー／下：列見出し（スケジュール名）」を
-      // 1つの要素にまとめる。この塊ごとstickyで上端固定する（CSS側 .wbs-header-block）ため、
-      // スクロールしても進捗バーと見出しが一緒に貼り付く。
       const projectProgressPercent = calculateProjectProgressPercent(scheduleTreeRows);
-      const headerHtml = `<div class="wbs-header-block">
-        <div class="wbs-project-progress-row">
-          <div class="wbs-project-progress-track"><div class="wbs-project-progress-fill" style="width:${projectProgressPercent}%"></div></div>
-          <div class="wbs-project-progress-label">進捗：${projectProgressPercent}%</div>
-        </div>
-        <div class="wbs-header-row"><span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>
+      const projectProgressOverlayHtml = `<div class="wbs-project-progress-overlay">
+        <div class="wbs-project-progress-track"><div class="wbs-project-progress-fill" style="width:${projectProgressPercent}%"></div></div>
+        <div class="wbs-project-progress-label">進捗：${projectProgressPercent}%</div>
       </div>`;
+      const headerHtml = `<div class="wbs-header-row">${projectProgressOverlayHtml}<span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>`;
 
       if (scheduleTreeRows.length === 0) {
-        return headerHtml  + '<p class="empty-state-message">スケジュールがありません。</p>';
+        return headerHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
       }
 
       const wbsNumberByScheduleId = calculateWbsNumbers(scheduleTreeRows);
