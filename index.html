@@ -6760,14 +6760,46 @@
       showToast("並び順を変更しました");
     }
 
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値（深さ優先順＝親の直後に
+    //   その子孫が全て並ぶ）。rootScheduleId は起点スケジュールのid。
+    // 【処理】深さ優先順という前提を使い、起点行の直後から、depthLevelが起点より大きい間だけ
+    //   子孫として集め、起点と同じか浅いdepthLevelに戻った時点で打ち切る
+    //   （filterVisibleScheduleTreeRowsの折りたたみ判定と同じ考え方）。
+    // 【結果】[起点行, ...子孫行]（起点行を含む深さ優先順の配列）を返す。起点idが
+    //   scheduleTreeRowsに存在しない場合は空配列を返す。
+    function collectScheduleRowSubtree(scheduleTreeRows, rootScheduleId) {
+      const rootIndex = scheduleTreeRows.findIndex((row) => row.schedule.id === rootScheduleId);
+      if (rootIndex === -1) return [];
+      const rootRow = scheduleTreeRows[rootIndex];
+      const subtreeRows = [rootRow];
+      for (let index = rootIndex + 1; index < scheduleTreeRows.length; index++) {
+        const row = scheduleTreeRows[index];
+        if (row.depthLevel <= rootRow.depthLevel) break;
+        subtreeRows.push(row);
+      }
+      return subtreeRows;
+    }
+
     // 【前提】draggedId は掴んで動かしたスケジュールのid。targetId はドロップ先の行のid。
-    //   同じidの場合、または親（parentId）が異なる場合（基本設計書4.1節「並び替えは同一階層
-    //   内でのみ可能」）は何もしない。
-    // 【処理】ドラッグ対象と同じ兄弟グループ内で、ドロップ先の位置へドラッグ対象を移動し、
-    //   兄弟全員のorderを0番から振り直して保存する（クリックでの上下移動は隣接swapで済むが、
-    //   ドラッグは任意の位置へ一気に移動できるため、隣接swapでは対応できず全員の振り直しが必要）。
-    // 【結果】兄弟内の並び順が変わり、ガントパネルが再描画され、
-    //   トースト「並び順を変更しました」を表示する（詳細設計書3.2.4）。
+    // 【処理】ドロップ先が同じ親（parentId一致）の兄弟であれば、上下矢印ボタンと同じ
+    //   「兄弟内の並び替え」として扱う（基本設計書4.1節：上下矢印は同一階層内でのみ移動可能・
+    //   確定仕様。ドラッグでも兄弟内移動はこの仕様を踏襲する）。
+    //   親が異なる場合は、上下矢印には無い「ドラッグ独自の操作」として、ドラッグ対象を
+    //   ドロップ先の子として付け替える（親子をまたいだ移動）。付け替え時は次の2点を検証し、
+    //   満たさない場合は何もせずalertで理由を伝える。
+    //   ・自分自身の配下（子孫）へは付け替えない（parentIdが循環参照になるため）
+    //   ・基本設計書4.1節の3階層制限（親→子→孫、ひ孫は不可）を、ドラッグ対象が子孫を
+    //     連れて移動する場合も含めて満たす（ドラッグ対象の配下で最も深い子孫が、移動後も
+    //     孫階層（depthLevel 2）を超えないことを判定する。この1本の判定式に、
+    //     「ドロップ先自身が孫階層で、これ以上子を持てない」場合も含まれる＝
+    //     子孫を連れていない（span=0）ドラッグ対象でも、ドロップ先が孫階層なら
+    //     newDepthLevelForDraggedRoot(3) が上限(2)を超え自動的に弾かれる）。
+    //   付け替え後は、ドロップ先の子の末尾（既存の子の数）に追加し、旧親・新親の双方で
+    //   syncAncestorDatesを呼んで日付を再計算する（基本設計書4.3節：子の増減は親の日付に
+    //   影響するため）。
+    // 【結果】同一階層内の並び替え、または親子の付け替えのいずれかが行われ、ガントパネルが
+    //   再描画される。並び替えは「並び順を変更しました」、付け替えは「スケジュールの階層を
+    //   変更しました」のトーストを表示する（詳細設計書3.2.4）。
     //   ロック中は何もしない（トースト「ロック中のため編集できません」）。
     async function handleScheduleDragDrop(draggedId, targetId) {
       if (draggedId === targetId) return;
@@ -6778,22 +6810,51 @@
       const draggedRow = currentScheduleTreeRows.find((row) => row.schedule.id === draggedId);
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === targetId);
       if (!draggedRow || !targetRow) return;
-      if (draggedRow.schedule.parentId !== targetRow.schedule.parentId) return;
 
-      const siblingSchedules = currentScheduleTreeRows
-        .filter((row) => row.schedule.parentId === draggedRow.schedule.parentId)
-        .map((row) => row.schedule)
-        .sort((a, b) => a.order - b.order);
-      const fromIndex = siblingSchedules.findIndex((schedule) => schedule.id === draggedId);
-      const toIndex = siblingSchedules.findIndex((schedule) => schedule.id === targetId);
-      const [movedSchedule] = siblingSchedules.splice(fromIndex, 1);
-      siblingSchedules.splice(toIndex, 0, movedSchedule);
+      if (draggedRow.schedule.parentId === targetRow.schedule.parentId) {
+        const siblingSchedules = currentScheduleTreeRows
+          .filter((row) => row.schedule.parentId === draggedRow.schedule.parentId)
+          .map((row) => row.schedule)
+          .sort((a, b) => a.order - b.order);
+        const fromIndex = siblingSchedules.findIndex((schedule) => schedule.id === draggedId);
+        const toIndex = siblingSchedules.findIndex((schedule) => schedule.id === targetId);
+        const [movedSchedule] = siblingSchedules.splice(fromIndex, 1);
+        siblingSchedules.splice(toIndex, 0, movedSchedule);
 
-      for (let index = 0; index < siblingSchedules.length; index++) {
-        await addSchedule({ ...siblingSchedules[index], order: index });
+        for (let index = 0; index < siblingSchedules.length; index++) {
+          await addSchedule({ ...siblingSchedules[index], order: index });
+        }
+        await refreshGanttPanel(currentSelectedProjectId);
+        showToast("並び順を変更しました");
+        return;
       }
+
+      const draggedSubtreeRows = collectScheduleRowSubtree(currentScheduleTreeRows, draggedId);
+      if (draggedSubtreeRows.some((row) => row.schedule.id === targetId)) {
+        window.alert("自分自身の配下には移動できません。");
+        return;
+      }
+
+      const draggedSubtreeDepthSpan = Math.max(...draggedSubtreeRows.map((row) => row.depthLevel)) - draggedRow.depthLevel;
+      const newDepthLevelForDraggedRoot = targetRow.depthLevel + 1;
+      if (newDepthLevelForDraggedRoot + draggedSubtreeDepthSpan > MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN) {
+        window.alert("これ以上深い階層のスケジュールは作成できません（親→子→孫の3階層まで）。");
+        return;
+      }
+
+      const originalParentId = draggedRow.schedule.parentId;
+      const newSiblingCount = currentScheduleTreeRows.filter(
+        (row) => row.schedule.parentId === targetRow.schedule.id
+      ).length;
+      await addSchedule({ ...draggedRow.schedule, parentId: targetRow.schedule.id, order: newSiblingCount });
+
+      if (originalParentId !== null && originalParentId !== undefined) {
+        await syncAncestorDates(originalParentId);
+      }
+      await syncAncestorDates(targetRow.schedule.id);
+
       await refreshGanttPanel(currentSelectedProjectId);
-      showToast("並び順を変更しました");
+      showToast("スケジュールの階層を変更しました");
     }
 
     // ===== ガントバーのドラッグによる日程変更（詳細設計書3.2.4） =====
@@ -6905,11 +6966,16 @@
     // 【前提】ドラッグ中であること。
     // 【処理】最終的な開始日・終了日を確定し、ドラッグ開始時点と変わっていなければ
     //   （＝実質クリックだった場合）何も保存せず見た目だけ元に戻す。変わっていれば
-    //   addScheduleで保存する。対象が親行（子を持つ行）の場合は、実際に確定した開始日の
-    //   移動量ぶん、配下の子孫スケジュールも平行移動して保存する（本セクション冒頭の設計判断）。
-    //   親（parentId）を持つ場合はsyncAncestorDatesで祖先の日付を再計算する（3.2.3）。
-    // 【結果】DBが更新され、ガントパネルが再描画される。実際に日付が変わった場合のみ
-    //   トースト「スケジュールを更新しました」を表示する（詳細設計書3.2.4）。
+    //   addScheduleで保存し、recordChangelogEntryで変更履歴を記録する（モーダル編集
+    //   handleScheduleModalSaveButtonClickと同じSCHEDULE_LOGGED_FIELD_LABELSで比較するため、
+    //   ドラッグによる期間変更もモーダル編集と同じ「変更」ログとして残る）。対象が親行
+    //   （子を持つ行）の場合は、実際に確定した開始日の移動量ぶん、配下の子孫スケジュールも
+    //   平行移動して保存する（本セクション冒頭の設計判断）。子孫の平行移動はドラッグした
+    //   対象そのものの変更ではなく副作用のため、syncAncestorDatesと同じ理由で個別にログは
+    //   残さない（記録するとノイズになるため）。親（parentId）を持つ場合はsyncAncestorDatesで
+    //   祖先の日付を再計算する（3.2.3）。
+    // 【結果】DBが更新され、変更履歴に記録され、ガントパネルが再描画される。実際に日付が
+    //   変わった場合のみトースト「スケジュールを更新しました」を表示する（詳細設計書3.2.4）。
     async function handleBarPointerUp(event) {
       if (!draggedBarScheduleId) return;
       const scheduleId = draggedBarScheduleId;
@@ -6942,6 +7008,17 @@
 
       const updatedSchedule = { ...scheduleRow.schedule, startDate, endDate };
       await addSchedule(updatedSchedule);
+      await recordChangelogEntry(
+        "edit",
+        updatedSchedule.projectId,
+        "schedules",
+        "スケジュール",
+        updatedSchedule.id,
+        updatedSchedule.name,
+        scheduleRow.schedule,
+        updatedSchedule,
+        SCHEDULE_LOGGED_FIELD_LABELS
+      );
 
       if (scheduleRow.hasChildren && mode === "move") {
         const actualStartDeltaDays = Math.round(
@@ -7172,8 +7249,8 @@
     //   （マインドマップのスライドパネル化自体を今回は見送っているため）。
 
     // 変更履歴（changelog）に記録するタスク管理(tasks)の対象フィールド。
-    // 既存のタスク編集モーダル（handleTaskModalSaveButtonClick）自体は変更履歴を記録していないため、
-    // 使用箇所は現時点でH2データ取込（差分適用の「変更」ログ）のみ。
+    // handleTaskModalSaveButtonClick（タスク編集モーダル）とH2データ取込
+    // （差分適用の「変更」ログ）の両方が、この定数を比較対象フィールドとして使う。
     const TASK_LOGGED_FIELD_LABELS = {
       title: "タスク名",
       status: "ステータス",
@@ -7293,6 +7370,9 @@
     //   ステータスを"done"に変更した場合はdoneAtを現在時刻にし、"done"以外に変更した場合は
     //   done/doneAtをリセットする（列埋め込みフォームでの新規作成時と同じ不変条件を維持する。
     //   すでに"done"だった場合はdoneAtの上書きをせず、最初に完了した時刻を保持する）。
+    //   保存後、recordChangelogEntryで変更履歴を記録する（スケジュール編集
+    //   handleScheduleModalSaveButtonClickと同じ扱い。TASK_LOGGED_FIELD_LABELSに挙げた
+    //   フィールド（期日=dueDateを含む）が実際に変わった場合のみdiffFieldsが検出し記録する）。
     // 【結果】保存成功時はモーダルを閉じ、カンバンパネルを更新する。
     async function handleTaskModalSaveButtonClick(existingTask) {
       const title = document.getElementById("taskModalTitleInput").value.trim();
@@ -7315,6 +7395,17 @@
         doneAt: status === "done" ? (existingTask.status === "done" ? existingTask.doneAt : new Date().toISOString()) : null,
       };
       await addTask(taskToSave);
+      await recordChangelogEntry(
+        "edit",
+        taskToSave.projectId,
+        "tasks",
+        "タスク",
+        taskToSave.id,
+        taskToSave.title,
+        existingTask,
+        taskToSave,
+        TASK_LOGGED_FIELD_LABELS
+      );
       closeModal();
       await refreshKanbanPanel(currentSelectedProjectId);
     }
@@ -8060,8 +8151,9 @@
         const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
       });
-      // ドラッグ＆ドロップによる並び替え（上下矢印ボタンと併用。同じ兄弟グループ内のみ有効
-      // ＝handleScheduleDragDrop側でparentId一致を判定する）。
+      // ドラッグ＆ドロップによるスケジュール移動（上下矢印ボタンと併用）。
+      // 同じ親同士の場合は兄弟内の並び替え、親が異なる場合はドロップ先の子への付け替えとなる
+      // （どちらの場合として扱うかはhandleScheduleDragDrop側でparentId一致を判定する）。
       document.getElementById("wbsPanel").addEventListener("dragstart", (event) => {
         const draggedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (!draggedRow) return;
