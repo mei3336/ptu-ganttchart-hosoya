@@ -4322,17 +4322,21 @@
         visibleColumns.endDate ? '<div class="wbs-column-extra">終了日</div>' : "",
         visibleColumns.status ? '<div class="wbs-column-extra">状態</div>' : "",
       ].join("");
-      const headerHtml = `<div class="wbs-header-row"><span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>`;
 
-      // 見出し行の直下・スケジュール一覧の直前に、プロジェクト全体の進捗バーを1本だけ表示する。
+      // 見出しブロックは「上：プロジェクト全体の進捗バー／下：列見出し（スケジュール名）」を
+      // 1つの要素にまとめる。この塊ごとstickyで上端固定する（CSS側 .wbs-header-block）ため、
+      // スクロールしても進捗バーと見出しが一緒に貼り付く。
       const projectProgressPercent = calculateProjectProgressPercent(scheduleTreeRows);
-      const projectProgressHtml = `<div class="wbs-project-progress-row">
-        <div class="wbs-project-progress-track"><div class="wbs-project-progress-fill" style="width:${projectProgressPercent}%"></div></div>
-        <div class="wbs-project-progress-label">進捗：${projectProgressPercent}%</div>
+      const headerHtml = `<div class="wbs-header-block">
+        <div class="wbs-project-progress-row">
+          <div class="wbs-project-progress-track"><div class="wbs-project-progress-fill" style="width:${projectProgressPercent}%"></div></div>
+          <div class="wbs-project-progress-label">進捗：${projectProgressPercent}%</div>
+        </div>
+        <div class="wbs-header-row"><span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>
       </div>`;
 
       if (scheduleTreeRows.length === 0) {
-        return headerHtml + projectProgressHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
+        return headerHtml  + '<p class="empty-state-message">スケジュールがありません。</p>';
       }
 
       const wbsNumberByScheduleId = calculateWbsNumbers(scheduleTreeRows);
@@ -4373,7 +4377,7 @@
           return `<div class="wbs-row" draggable="true" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="wbs-drag-handle" title="ドラッグして並び替え">⋮⋮</span><div class="wbs-column-name">${indentedName}${toggleButtonHtml} ${escapeHtmlText(schedule.name)}</div>${extraColumnsHtml}${iconsHtml}</div>`;
         })
         .join("");
-      return headerHtml + projectProgressHtml + rowsHtml;
+      return headerHtml + rowsHtml;
     }
 
     // 【前提】month は1〜12の整数。
