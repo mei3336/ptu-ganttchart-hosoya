@@ -453,6 +453,22 @@
       width: 14px;
     }
 
+    /* ドラッグ中のドロップ先候補の見た目（calculateScheduleDropPositionの3判定に対応）。
+       上端＝前に挿入、下端＝後に挿入、中央＝子にする、をそれぞれ別の見た目で示す。 */
+    .wbs-row.is-drop-target-before {
+      box-shadow: inset 0 2px 0 0 var(--color-accent);
+    }
+
+    .wbs-row.is-drop-target-after {
+      box-shadow: inset 0 -2px 0 0 var(--color-accent);
+    }
+
+    .wbs-row.is-drop-target-child {
+      background: var(--color-primary-light);
+      outline: 1.5px dashed var(--color-accent);
+      outline-offset: -1.5px;
+    }
+
     .gantt-scroll-area {
       flex: 1;
       overflow-x: auto;
@@ -3374,6 +3390,9 @@
     const collapsedCommentGroupScheduleIds = new Set();
     // ドラッグ操作中のスケジュールid。ドラッグ開始時に設定し、ドロップ処理後にnullへ戻す。
     let draggedScheduleId = null;
+    // ドラッグ中に「ドロップ先候補」として見た目のハイライト（is-drop-target-*クラス）を
+    // 付けているWBS行のDOM要素。dragover対象が変わるたびに前の行から外し、この行に付け替える。
+    let scheduleDropHighlightRowElement = null;
     // ドラッグ操作中のタスクid（カンバンのカード）。draggedScheduleIdと同じ理由・同じ寿命。
     let draggedTaskId = null;
 
@@ -6635,7 +6654,12 @@
     }
 
     // 変更履歴（changelog）に記録するスケジュールの対象フィールド（データモデル設計6章）。
-    // projectId/parentId/orderはユーザーが直接編集する値ではないため対象外。
+    // projectIdは常に不変、parentIdはid値そのもの（人が読んでも意味がわからない）のため
+    // 対象外。一方orderは、WBSパネルでのドラッグ操作（並び替え・親子の付け替え、
+    // handleScheduleDragDrop参照）でユーザーが直接動かした結果であり、数値なので
+    // そのまま「並び順：2→5」のように表示しても意味が通るため対象に含める。既存の
+    // モーダル編集・バードラッグ・タスクモーダル保存はorderを変更しないため、この追加で
+    // それらのログ内容が変わることはない。
     const SCHEDULE_LOGGED_FIELD_LABELS = {
       name: "名前",
       startDate: "開始日",
@@ -6644,6 +6668,7 @@
       taskStatus: "ステータス",
       notes: "メモ",
       color: "カラー",
+      order: "並び順",
     };
 
     // 【前提】existingSchedule はnull（新規作成）または既存スケジュールオブジェクト（編集）。
@@ -6760,6 +6785,36 @@
       showToast("並び順を変更しました");
     }
 
+    // 【前提】event はWBS行上で発生したdragover/dropのDragEvent。rowElement は判定対象の
+    //   WBS行要素（.wbs-row[data-schedule-id]）。
+    // 【処理】行の高さに対するポインタのY座標の割合を求める。上端25%未満なら「前に挿入」、
+    //   下端25%より下なら「後に挿入」、それ以外（中央50%）なら「子にする」と判定する
+    //   （VSCodeのエクスプローラ等、多くのツリーUIで採用されている「行の上下端＝並び替え・
+    //   中央＝ネスト」という配置と同じ考え方。ドロップ操作全体の設計はhandleScheduleDragDrop
+    //   のコメントを参照）。
+    // 【結果】"before" | "after" | "child" のいずれかを返す。
+    function calculateScheduleDropPosition(event, rowElement) {
+      const rowRect = rowElement.getBoundingClientRect();
+      const pointerRatioWithinRow = (event.clientY - rowRect.top) / rowRect.height;
+      if (pointerRatioWithinRow < 0.25) return "before";
+      if (pointerRatioWithinRow > 0.75) return "after";
+      return "child";
+    }
+
+    // 【前提】なし（scheduleDropHighlightRowElementがnullの場合は何もしない）。
+    // 【処理】ドラッグ中のドロップ先候補として付けていたis-drop-target-*クラスを、
+    //   直前にハイライトしていた行から取り除く。
+    // 【結果】ハイライトが消え、scheduleDropHighlightRowElementをnullに戻す。
+    function clearScheduleDropHighlight() {
+      if (!scheduleDropHighlightRowElement) return;
+      scheduleDropHighlightRowElement.classList.remove(
+        "is-drop-target-before",
+        "is-drop-target-after",
+        "is-drop-target-child"
+      );
+      scheduleDropHighlightRowElement = null;
+    }
+
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値（深さ優先順＝親の直後に
     //   その子孫が全て並ぶ）。rootScheduleId は起点スケジュールのid。
     // 【処理】深さ優先順という前提を使い、起点行の直後から、depthLevelが起点より大きい間だけ
@@ -6780,28 +6835,145 @@
       return subtreeRows;
     }
 
+    // 【前提】draggedRow・newParentDepthLevelは、これから確定させたい「ドラッグ対象の移動後の
+    //   depthLevel」を求めるための材料。draggedSubtreeRowsはcollectScheduleRowSubtreeの戻り値
+    //   （ドラッグ対象自身＋その子孫、深さ優先順）。
+    // 【処理】ドラッグ対象の配下で最も深い子孫の「起点からの相対的な深さ」を求め、それを
+    //   newParentDepthLevelに足した値が、基本設計書4.1節の3階層制限（親→子→孫、ひ孫は不可。
+    //   depthLevelは0始まりのため最大値は2）を超えないか判定する。ドラッグ対象自身に子孫が
+    //   居ない場合（相対的な深さ0）は、newParentDepthLevelそのものが2を超えないかだけの
+    //   判定になる（＝ドロップ先が既に孫階層で、これ以上子を持てない場合の判定を兼ねる）。
+    // 【結果】3階層制限を満たすならtrue、超えるならfalseを返す。
+    function isScheduleMoveWithinDepthLimit(draggedRow, draggedSubtreeRows, newParentDepthLevel) {
+      const draggedSubtreeDepthSpan = Math.max(...draggedSubtreeRows.map((row) => row.depthLevel)) - draggedRow.depthLevel;
+      return newParentDepthLevel + draggedSubtreeDepthSpan <= MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN;
+    }
+
+    // 【前提】beforeSchedule・afterSchedule は、ドラッグによる並び替え／親子付け替え操作の
+    //   前後のスケジュール（呼び出し元はreparentScheduleAsChild・moveScheduleAsSibling）。
+    // 【処理】通常はdiffFields（SCHEDULE_LOGGED_FIELD_LABELS）で差分を集めるが、この操作に
+    //   限っては「ドラッグ操作は必ず並び順に意味のある変更を加えている」という前提のため、
+    //   orderの値がたまたま変わらなかった場合（例：ドロップ先の子が0件で、付け替え後の
+    //   orderも0のまま）でもrecordChangelogEntryの「差分が無ければ記録しない」という
+    //   一般ルールを上書きし、並び順の変更として必ず1件記録する（記録が抜け落ちると、
+    //   親子付け替えという実際に起きた変更を変更履歴から追えなくなるため）。
+    // 【結果】DBのchangelogストアに1件追加する（戻り値なし）。
+    async function recordScheduleDragChangelogEntry(beforeSchedule, afterSchedule) {
+      const changes = diffFields(beforeSchedule, afterSchedule, SCHEDULE_LOGGED_FIELD_LABELS);
+      if (!changes.some((change) => change.field === "order")) {
+        changes.push({ field: "order", label: "並び順", before: beforeSchedule.order ?? null, after: afterSchedule.order ?? null });
+      }
+      await addChangelogEntry({
+        id: generateId(),
+        projectId: afterSchedule.projectId,
+        action: "edit",
+        store: "schedules",
+        storeLabel: "スケジュール",
+        itemId: afterSchedule.id,
+        itemName: afterSchedule.name,
+        changes,
+        snapshot: beforeSchedule,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    // 【前提】draggedRowは移動対象、targetRowはドロップ先の行。どちらもcurrentScheduleTreeRows
+    //   に含まれる行であること。
+    // 【処理】ドラッグ対象をtargetRowの子として付け替える（末尾＝targetRowの既存の子の数を
+    //   新しいorderとする）。付け替え後、旧親・新親（targetRow）の両方でsyncAncestorDatesを
+    //   呼び、日付を再計算する（基本設計書4.3節：子の増減は親の日付に影響するため）。
+    //   変更はrecordScheduleDragChangelogEntryで記録する（parentId自体はSCHEDULE_LOGGED_FIELD_LABELSに
+    //   含めないため、結果として「並び順：旧→新」という形で記録される。期間（startDate/endDate）は
+    //   この操作では変更しないため、ここでは変わらない）。
+    // 【結果】DBが更新され、ガントパネルが再描画され、
+    //   トースト「スケジュールの階層を変更しました」を表示する。
+    async function reparentScheduleAsChild(draggedRow, targetRow) {
+      const originalParentId = draggedRow.schedule.parentId;
+      const newSiblingCount = currentScheduleTreeRows.filter(
+        (row) => row.schedule.parentId === targetRow.schedule.id
+      ).length;
+      const updatedSchedule = { ...draggedRow.schedule, parentId: targetRow.schedule.id, order: newSiblingCount };
+      await addSchedule(updatedSchedule);
+      await recordScheduleDragChangelogEntry(draggedRow.schedule, updatedSchedule);
+
+      if (originalParentId !== null && originalParentId !== undefined) {
+        await syncAncestorDates(originalParentId);
+      }
+      await syncAncestorDates(targetRow.schedule.id);
+
+      await refreshGanttPanel(currentSelectedProjectId);
+      showToast("スケジュールの階層を変更しました");
+    }
+
+    // 【前提】draggedRowは移動対象、targetRowはドロップ先の行、dropPositionは"before"|"after"。
+    // 【処理】ドラッグ対象を「targetRowと同じ親を持つ兄弟」として、targetRowの直前
+    //   （"before"）または直後（"after"）に挿入する。ドラッグ対象を除いた新しい親の兄弟一覧を
+    //   order順に並べ、targetRowの位置を基準に挿入位置を決め、兄弟全員のorderを0番から
+    //   振り直して保存する（クリックでの上下移動は隣接swapで済むが、ドラッグは任意の位置へ
+    //   一気に移動できるため、隣接swapでは対応できず全員の振り直しが必要）。
+    //   親が変わった場合（＝異なる親を持つ行の間へ移動した場合）は、旧親・新親の両方で
+    //   syncAncestorDatesを呼ぶ。親が変わらない場合（＝上下矢印と同じ「同一階層内の並び替え」）
+    //   は日付への影響が無いためsyncAncestorDatesを呼ばない。
+    //   変更はドラッグ対象1件についてのみrecordScheduleDragChangelogEntryで記録する
+    //   （再配置の巻き添えで一緒にorderがずれる他の兄弟は、ユーザーが直接操作した対象ではない
+    //   ため、syncAncestorDatesの副作用と同じ理由でログを残さない）。
+    // 【結果】DBが更新され、ガントパネルが再描画される。親が変わった場合はトースト
+    //   「スケジュールの階層を変更しました」、変わらない場合は「並び順を変更しました」を表示する。
+    async function moveScheduleAsSibling(draggedRow, targetRow, dropPosition) {
+      const newParentId = targetRow.schedule.parentId ?? null;
+      const originalParentId = draggedRow.schedule.parentId ?? null;
+
+      const siblingSchedules = currentScheduleTreeRows
+        .filter((row) => row.schedule.parentId === newParentId && row.schedule.id !== draggedRow.schedule.id)
+        .map((row) => row.schedule)
+        .sort((a, b) => a.order - b.order);
+      const targetIndex = siblingSchedules.findIndex((schedule) => schedule.id === targetRow.schedule.id);
+      const insertIndex = dropPosition === "before" ? targetIndex : targetIndex + 1;
+      siblingSchedules.splice(insertIndex, 0, draggedRow.schedule);
+
+      let updatedDraggedSchedule = null;
+      for (let index = 0; index < siblingSchedules.length; index++) {
+        const scheduleAtIndex = siblingSchedules[index];
+        const savedSchedule = { ...scheduleAtIndex, parentId: newParentId, order: index };
+        await addSchedule(savedSchedule);
+        if (scheduleAtIndex.id === draggedRow.schedule.id) updatedDraggedSchedule = savedSchedule;
+      }
+
+      await recordScheduleDragChangelogEntry(draggedRow.schedule, updatedDraggedSchedule);
+
+      const didParentChange = originalParentId !== newParentId;
+      if (didParentChange) {
+        if (originalParentId !== null && originalParentId !== undefined) {
+          await syncAncestorDates(originalParentId);
+        }
+        if (newParentId !== null && newParentId !== undefined) {
+          await syncAncestorDates(newParentId);
+        }
+      }
+
+      await refreshGanttPanel(currentSelectedProjectId);
+      showToast(didParentChange ? "スケジュールの階層を変更しました" : "並び順を変更しました");
+    }
+
     // 【前提】draggedId は掴んで動かしたスケジュールのid。targetId はドロップ先の行のid。
-    // 【処理】ドロップ先が同じ親（parentId一致）の兄弟であれば、上下矢印ボタンと同じ
-    //   「兄弟内の並び替え」として扱う（基本設計書4.1節：上下矢印は同一階層内でのみ移動可能・
-    //   確定仕様。ドラッグでも兄弟内移動はこの仕様を踏襲する）。
-    //   親が異なる場合は、上下矢印には無い「ドラッグ独自の操作」として、ドラッグ対象を
-    //   ドロップ先の子として付け替える（親子をまたいだ移動）。付け替え時は次の2点を検証し、
-    //   満たさない場合は何もせずalertで理由を伝える。
-    //   ・自分自身の配下（子孫）へは付け替えない（parentIdが循環参照になるため）
+    //   dropPositionは"before"|"after"|"child"（calculateScheduleDropPositionの戻り値。
+    //   ドロップ位置がWBS行の上端付近／下端付近／中央のどこだったかを表す）。
+    // 【処理】ドロップ位置に応じて次の2種類の操作に振り分ける（上下矢印ボタンには無い、
+    //   ドラッグ独自の操作）。
+    //   ・dropPosition==="child"：ドラッグ対象をtargetRowの子として付け替える
+    //     （reparentScheduleAsChild）。
+    //   ・それ以外（"before"|"after"）：ドラッグ対象をtargetRowと同じ親を持つ兄弟として、
+    //     その前後に挿入する（moveScheduleAsSibling）。targetRowが元々と同じ親であれば
+    //     上下矢印と同じ「兄弟内の並び替え」に、異なる親であれば「親をまたいだ移動」になる。
+    //   どちらの操作も、次の2点を満たさない場合は何もせずalertで理由を伝える。
+    //   ・自分自身の配下（子孫）へは移動しない（parentIdが循環参照になるため。dropPositionが
+    //     "before"/"after"の場合、移動先の親は必ずtargetRow自身の外側にあるため、targetRowが
+    //     自分の子孫でなければ移動先の親も自分の子孫にはなり得ない）
     //   ・基本設計書4.1節の3階層制限（親→子→孫、ひ孫は不可）を、ドラッグ対象が子孫を
-    //     連れて移動する場合も含めて満たす（ドラッグ対象の配下で最も深い子孫が、移動後も
-    //     孫階層（depthLevel 2）を超えないことを判定する。この1本の判定式に、
-    //     「ドロップ先自身が孫階層で、これ以上子を持てない」場合も含まれる＝
-    //     子孫を連れていない（span=0）ドラッグ対象でも、ドロップ先が孫階層なら
-    //     newDepthLevelForDraggedRoot(3) が上限(2)を超え自動的に弾かれる）。
-    //   付け替え後は、ドロップ先の子の末尾（既存の子の数）に追加し、旧親・新親の双方で
-    //   syncAncestorDatesを呼んで日付を再計算する（基本設計書4.3節：子の増減は親の日付に
-    //   影響するため）。
-    // 【結果】同一階層内の並び替え、または親子の付け替えのいずれかが行われ、ガントパネルが
-    //   再描画される。並び替えは「並び順を変更しました」、付け替えは「スケジュールの階層を
-    //   変更しました」のトーストを表示する（詳細設計書3.2.4）。
+    //     連れて移動する場合も含めて満たす（isScheduleMoveWithinDepthLimit）
+    // 【結果】並び替え・親子の付け替えのいずれかが行われ、ガントパネルが再描画される。
     //   ロック中は何もしない（トースト「ロック中のため編集できません」）。
-    async function handleScheduleDragDrop(draggedId, targetId) {
+    async function handleScheduleDragDrop(draggedId, targetId, dropPosition) {
       if (draggedId === targetId) return;
       if (currentProjectObject?.locked) {
         showToast("ロック中のため編集できません");
@@ -6811,50 +6983,27 @@
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === targetId);
       if (!draggedRow || !targetRow) return;
 
-      if (draggedRow.schedule.parentId === targetRow.schedule.parentId) {
-        const siblingSchedules = currentScheduleTreeRows
-          .filter((row) => row.schedule.parentId === draggedRow.schedule.parentId)
-          .map((row) => row.schedule)
-          .sort((a, b) => a.order - b.order);
-        const fromIndex = siblingSchedules.findIndex((schedule) => schedule.id === draggedId);
-        const toIndex = siblingSchedules.findIndex((schedule) => schedule.id === targetId);
-        const [movedSchedule] = siblingSchedules.splice(fromIndex, 1);
-        siblingSchedules.splice(toIndex, 0, movedSchedule);
-
-        for (let index = 0; index < siblingSchedules.length; index++) {
-          await addSchedule({ ...siblingSchedules[index], order: index });
-        }
-        await refreshGanttPanel(currentSelectedProjectId);
-        showToast("並び順を変更しました");
-        return;
-      }
-
       const draggedSubtreeRows = collectScheduleRowSubtree(currentScheduleTreeRows, draggedId);
       if (draggedSubtreeRows.some((row) => row.schedule.id === targetId)) {
         window.alert("自分自身の配下には移動できません。");
         return;
       }
 
-      const draggedSubtreeDepthSpan = Math.max(...draggedSubtreeRows.map((row) => row.depthLevel)) - draggedRow.depthLevel;
-      const newDepthLevelForDraggedRoot = targetRow.depthLevel + 1;
-      if (newDepthLevelForDraggedRoot + draggedSubtreeDepthSpan > MAX_SCHEDULE_DEPTH_LEVEL_ALLOWING_CHILDREN) {
-        window.alert("これ以上深い階層のスケジュールは作成できません（親→子→孫の3階層まで）。");
+      if (dropPosition === "child") {
+        const newDepthLevel = targetRow.depthLevel + 1;
+        if (!isScheduleMoveWithinDepthLimit(draggedRow, draggedSubtreeRows, newDepthLevel)) {
+          window.alert("これ以上深い階層のスケジュールは作成できません（親→子→孫の3階層まで）。");
+          return;
+        }
+        await reparentScheduleAsChild(draggedRow, targetRow);
         return;
       }
 
-      const originalParentId = draggedRow.schedule.parentId;
-      const newSiblingCount = currentScheduleTreeRows.filter(
-        (row) => row.schedule.parentId === targetRow.schedule.id
-      ).length;
-      await addSchedule({ ...draggedRow.schedule, parentId: targetRow.schedule.id, order: newSiblingCount });
-
-      if (originalParentId !== null && originalParentId !== undefined) {
-        await syncAncestorDates(originalParentId);
+      if (!isScheduleMoveWithinDepthLimit(draggedRow, draggedSubtreeRows, targetRow.depthLevel)) {
+        window.alert("これ以上深い階層のスケジュールは作成できません（親→子→孫の3階層まで）。");
+        return;
       }
-      await syncAncestorDates(targetRow.schedule.id);
-
-      await refreshGanttPanel(currentSelectedProjectId);
-      showToast("スケジュールの階層を変更しました");
+      await moveScheduleAsSibling(draggedRow, targetRow, dropPosition);
     }
 
     // ===== ガントバーのドラッグによる日程変更（詳細設計書3.2.4） =====
@@ -8151,9 +8300,9 @@
         const clickedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (clickedRow) handleWbsRowClick(clickedRow.dataset.scheduleId);
       });
-      // ドラッグ＆ドロップによるスケジュール移動（上下矢印ボタンと併用）。
-      // 同じ親同士の場合は兄弟内の並び替え、親が異なる場合はドロップ先の子への付け替えとなる
-      // （どちらの場合として扱うかはhandleScheduleDragDrop側でparentId一致を判定する）。
+      // ドラッグ＆ドロップによるスケジュール移動（上下矢印ボタンと併用）。行の上端/下端付近＝
+      // 兄弟として挿入、中央＝子として付け替え、という2種類の操作をポインタ位置で判定する
+      // （calculateScheduleDropPosition・見た目のハイライトはis-drop-target-*クラス）。
       document.getElementById("wbsPanel").addEventListener("dragstart", (event) => {
         const draggedRow = event.target.closest(".wbs-row[data-schedule-id]");
         if (!draggedRow) return;
@@ -8161,14 +8310,32 @@
         event.dataTransfer.effectAllowed = "move";
       });
       document.getElementById("wbsPanel").addEventListener("dragover", (event) => {
+        const rowElement = event.target.closest(".wbs-row[data-schedule-id]");
+        if (!rowElement) {
+          clearScheduleDropHighlight();
+          return;
+        }
         // ドロップを許可するにはdragoverでpreventDefault()が必須（ブラウザの既定動作）。
-        if (event.target.closest(".wbs-row[data-schedule-id]")) event.preventDefault();
+        event.preventDefault();
+        const dropPosition = calculateScheduleDropPosition(event, rowElement);
+        if (scheduleDropHighlightRowElement && scheduleDropHighlightRowElement !== rowElement) {
+          clearScheduleDropHighlight();
+        }
+        rowElement.classList.remove("is-drop-target-before", "is-drop-target-after", "is-drop-target-child");
+        rowElement.classList.add(`is-drop-target-${dropPosition}`);
+        scheduleDropHighlightRowElement = rowElement;
       });
       document.getElementById("wbsPanel").addEventListener("drop", (event) => {
         const targetRow = event.target.closest(".wbs-row[data-schedule-id]");
+        const dropPosition = targetRow ? calculateScheduleDropPosition(event, targetRow) : null;
+        clearScheduleDropHighlight();
         if (!targetRow || !draggedScheduleId) return;
         event.preventDefault();
-        handleScheduleDragDrop(draggedScheduleId, targetRow.dataset.scheduleId);
+        handleScheduleDragDrop(draggedScheduleId, targetRow.dataset.scheduleId, dropPosition);
+        draggedScheduleId = null;
+      });
+      document.getElementById("wbsPanel").addEventListener("dragend", () => {
+        clearScheduleDropHighlight();
         draggedScheduleId = null;
       });
 
