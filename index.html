@@ -318,6 +318,32 @@
       font-size: 12px;
     }
 
+    /* 見出し行の直下・スケジュール一覧の直前に置く、プロジェクト全体の進捗バー。
+       #taskPopup側の.task-popup-progress-*（1件のスケジュール用）とは対象が異なるため、
+       クラス名をwbs-project-progress-*として明確に分ける。 */
+    .wbs-project-progress-row {
+      padding: 8px 8px 10px;
+      border-bottom: 1.5px solid var(--color-border);
+    }
+
+    .wbs-project-progress-track {
+      height: 6px;
+      background: var(--color-surface-3);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+
+    .wbs-project-progress-fill {
+      height: 100%;
+      background: var(--color-accent);
+    }
+
+    .wbs-project-progress-label {
+      font-size: 11px;
+      color: var(--color-text-light);
+    }
+
     .wbs-row {
       height: var(--gantt-row-height);
       display: flex;
@@ -4234,6 +4260,21 @@
         .join("");
     }
 
+    // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値（全件）。
+    // 【処理】子を持たない末端タスクだけを対象に、PROGRESS_PERCENT_BY_SCHEDULE_STATUSの値を
+    //   単純平均する。親（グループ）行は日付が子から自動計算されるだけの箱であり、実際に
+    //   作業するのは末端タスクのため、親行のtaskStatusは対象から除く（二重集計を避ける）。
+    // 【結果】プロジェクト全体の進捗率(%、0〜100の整数)。末端タスクが1件も無ければ0。
+    function calculateProjectProgressPercent(scheduleTreeRows) {
+      const leafRows = scheduleTreeRows.filter((row) => !row.hasChildren);
+      if (leafRows.length === 0) return 0;
+      const progressPercentTotal = leafRows.reduce(
+        (total, row) => total + (PROGRESS_PERCENT_BY_SCHEDULE_STATUS[row.schedule.taskStatus] ?? 0),
+        0
+      );
+      return Math.round(progressPercentTotal / leafRows.length);
+    }
+
     // 【前提】scheduleTreeRows は buildScheduleTreeRows の戻り値（折りたたみ状態に関係なく
     //   常に全件）。visibleColumns は {startDate, endDate, status} の表示可否
     //   （基本設計書2.2節の固定順で右側から列を追加）。collapsedScheduleIds は折りたたまれている
@@ -4251,6 +4292,10 @@
     //   開閉アイコンだけは「常時表示」（基本設計書4.1節に記載のある機能のため、ホバー無しでも
     //   操作できるようにする）。それ以外（ドラッグハンドル・操作アイコン群）はモーダル・
     //   ダイアログ一覧「1.」の指示どおりホバー時のみうっすら表示する。
+    //
+    //   見出し行とスケジュール一覧の間には、calculateProjectProgressPercentで算出した
+    //   プロジェクト全体の進捗バーを1本挟む（スケジュール単位の進捗は#taskPopup側の役割のため、
+    //   ここでは個々の行ではなくプロジェクト全体の1本だけを表示する）。
     // 【結果】wbsPanel要素のinnerHTMLにそのまま入れられるHTML文字列を返す。
     function renderWbsPanelToHtml(scheduleTreeRows, visibleColumns, collapsedScheduleIds) {
       const headerExtraColumnsHtml = [
@@ -4260,8 +4305,15 @@
       ].join("");
       const headerHtml = `<div class="wbs-header-row"><span class="wbs-drag-handle-spacer"></span><div class="wbs-column-name">スケジュール名</div>${headerExtraColumnsHtml}<div class="wbs-row-icons"></div></div>`;
 
+      // 見出し行の直下・スケジュール一覧の直前に、プロジェクト全体の進捗バーを1本だけ表示する。
+      const projectProgressPercent = calculateProjectProgressPercent(scheduleTreeRows);
+      const projectProgressHtml = `<div class="wbs-project-progress-row">
+        <div class="wbs-project-progress-track"><div class="wbs-project-progress-fill" style="width:${projectProgressPercent}%"></div></div>
+        <div class="wbs-project-progress-label">進捗：${projectProgressPercent}%</div>
+      </div>`;
+
       if (scheduleTreeRows.length === 0) {
-        return headerHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
+        return headerHtml + projectProgressHtml + '<p class="empty-state-message">スケジュールがありません。</p>';
       }
 
       const wbsNumberByScheduleId = calculateWbsNumbers(scheduleTreeRows);
@@ -4302,7 +4354,7 @@
           return `<div class="wbs-row" draggable="true" data-schedule-id="${escapeHtmlText(schedule.id)}"><span class="wbs-drag-handle" title="ドラッグして並び替え">⋮⋮</span><div class="wbs-column-name">${indentedName}${toggleButtonHtml} ${escapeHtmlText(schedule.name)}</div>${extraColumnsHtml}${iconsHtml}</div>`;
         })
         .join("");
-      return headerHtml + rowsHtml;
+      return headerHtml + projectProgressHtml + rowsHtml;
     }
 
     // 【前提】month は1〜12の整数。
