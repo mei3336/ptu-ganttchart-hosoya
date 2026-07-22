@@ -331,11 +331,12 @@
       top: 0;
       left: 0;
       right: 0;
-      height: var(--milestone-band-height);
+      height: var(--gantt-row-height);
       display: flex;
       align-items: center;
       gap: 6px;
       border-bottom: 1px solid var(--color-border);
+      background-color: var(--color-white);
     }
 
     .wbs-project-progress-track {
@@ -7331,7 +7332,7 @@
     }
 
     // 【前提】scheduleId は削除したいスケジュールのid。
-    // 【処理】子の有無でC2（子なし）／C3（子あり・サブタスクごと削除）の確認文言を切り替えて
+    // 【処理】子の有無でC2（子なし）／C3（子あり・子スケジュールごと削除）の確認文言を切り替えて
     //   confirm()し、OKならdeleteScheduleCascadeで削除する（連鎖削除・コメント削除・
     //   変更履歴記録・祖先日付再計算は既存の複合操作にすべて任せる）。
     // 【結果】確認OK時、対象と子孫が削除されガントパネルが再描画され、トースト「削除しました」を
@@ -7345,7 +7346,7 @@
       const targetRow = currentScheduleTreeRows.find((row) => row.schedule.id === scheduleId);
       if (!targetRow) return;
       const confirmMessage = targetRow.hasChildren
-        ? `「${targetRow.schedule.name}」とそのサブタスクをすべて削除しますか？`
+        ? `「${targetRow.schedule.name}」とその子スケジュールをすべて削除しますか？`
         : `「${targetRow.schedule.name}」を削除しますか？`;
       if (!window.confirm(confirmMessage)) return;
       await deleteScheduleCascade(scheduleId, currentSelectedProjectId);
