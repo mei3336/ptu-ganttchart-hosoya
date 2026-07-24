@@ -2751,7 +2751,13 @@
       const endDates = childrenWithDates.map((child) => child.endDate).sort();
       const earliestStartDate = startDates[0];
       const latestEndDate = endDates[endDates.length - 1];
-      await addSchedule({ ...schedule, startDate: earliestStartDate, endDate: latestEndDate });
+      const updatedSchedule = { ...schedule, startDate: earliestStartDate, endDate: latestEndDate };
+      await addSchedule(updatedSchedule);
+      // 【設計判断】以前は変更履歴に残していなかったが、結合試験仕様書「祖先の日付が変わった
+      // 場合はその変更ログも表示される」に合わせて記録する。recordChangelogEntryは
+      // SCHEDULE_LOGGED_FIELD_LABELSで実際に値が変わったフィールドが無ければ記録しないため、
+      // 日付が変わらなかった呼び出し（子の追加・編集のたびに再帰的に呼ばれる）ではログが増えない。
+      await recordChangelogEntry("edit", updatedSchedule.projectId, "schedules", "スケジュール", updatedSchedule.id, updatedSchedule.name, schedule, updatedSchedule, SCHEDULE_LOGGED_FIELD_LABELS);
 
       if (schedule.parentId !== null && schedule.parentId !== undefined) {
         await syncAncestorDates(schedule.parentId);
@@ -5151,10 +5157,17 @@
           const compareResultHtml = isExpanded && snapshotCompareResultsById.has(snapshot.id)
             ? renderSnapshotCompareResultToHtml(snapshotCompareResultsById.get(snapshot.id))
             : "";
+          // 基本設計書7章「一覧表示｜プロジェクト名＋日付、作成日時、スケジュール件数、
+          // プロジェクト期間を表示」に合わせ、保存時点のスケジュール件数とプロジェクト期間を添える。
+          const scheduleCount = snapshot.data.schedules.length;
+          const projectPeriodText = snapshot.data.project
+            ? `${escapeHtmlText(snapshot.data.project.startDate)} 〜 ${escapeHtmlText(snapshot.data.project.endDate)}`
+            : "";
           return `<div class="panel-list-item" data-snapshot-id="${escapeHtmlText(snapshot.id)}">
             <div class="panel-list-item-main">
               <div>${escapeHtmlText(snapshot.name)}</div>
               <div class="panel-list-item-meta">${escapeHtmlText(snapshot.createdAt)}</div>
+              <div class="panel-list-item-meta">${scheduleCount}件のスケジュール・${projectPeriodText}</div>
               ${compareResultHtml}
             </div>
             <div class="panel-list-item-actions snapshot-item-icons">
@@ -5435,7 +5448,7 @@
           const selectedClass = memo.id === selectedMemoId ? " is-selected" : "";
           return `<div class="panel-list-item memo-list-item${selectedClass}" data-memo-id="${escapeHtmlText(memo.id)}" data-action="select-memo">
             <div class="panel-list-item-main">
-              <div>${escapeHtmlText(memo.title)}</div>
+              <div>${escapeHtmlText(memo.title || "無題")}</div>
               <div class="panel-list-item-meta">${escapeHtmlText(memo.updatedAt)}</div>
             </div>
             <div class="panel-list-item-actions">
@@ -7192,11 +7205,15 @@
         const allSchedules = currentScheduleTreeRows.map((row) => row.schedule);
         const descendants = collectScheduleDescendants(scheduleId, allSchedules);
         for (const descendant of descendants) {
-          await addSchedule({
+          const updatedDescendant = {
             ...descendant,
             startDate: shiftDateStringByDays(descendant.startDate, actualStartDeltaDays),
             endDate: shiftDateStringByDays(descendant.endDate, actualStartDeltaDays),
-          });
+          };
+          await addSchedule(updatedDescendant);
+          // 【設計判断】以前は親バーの移動に追従する子孫の平行移動をログに残していなかったが、
+          // 結合試験仕様書「移動分と追従分のエントリが表示される」に合わせて記録する。
+          await recordChangelogEntry("edit", updatedDescendant.projectId, "schedules", "スケジュール", updatedDescendant.id, updatedDescendant.name, descendant, updatedDescendant, SCHEDULE_LOGGED_FIELD_LABELS);
         }
       }
 
@@ -7598,12 +7615,16 @@
       const taskList = await getTasksByProject(currentSelectedProjectId);
       const task = taskList.find((candidateTask) => candidateTask.id === taskId);
       if (!task || task.status === targetColumnStatus) return;
-      await addTask({
+      const updatedTask = {
         ...task,
         status: targetColumnStatus,
         done: targetColumnStatus === "done",
         doneAt: targetColumnStatus === "done" ? new Date().toISOString() : null,
-      });
+      };
+      await addTask(updatedTask);
+      // タスク編集モーダルでのステータス変更と同じ記録経路に揃える（詳細設計書3.3.3にはログの
+      // 言及が無いが、モーダル経由の変更と扱いが割れるのを避けるため統一する）。
+      await recordChangelogEntry("edit", updatedTask.projectId, "tasks", "タスク", updatedTask.id, updatedTask.title, task, updatedTask, TASK_LOGGED_FIELD_LABELS);
       await refreshKanbanPanel(currentSelectedProjectId);
     }
 
