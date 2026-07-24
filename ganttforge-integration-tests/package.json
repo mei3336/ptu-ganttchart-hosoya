@@ -1,0 +1,16 @@
+{
+  "name": "ganttforge-integration-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GanttForge再現アプリ 結合試験自動化ハーネス（Playwright + IndexedDB検証）",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report",
+    "writeback": "python3 helpers/results-writer.py"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}
